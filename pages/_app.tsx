@@ -1,9 +1,11 @@
 import '@/styles/globals.css';
 import "@/styles/user.css";
 import "@/styles/utility.css";
+import "@/styles/elora.css";
 import type { AppProps } from 'next/app';
 import StockwiseLayout from '@/components/Stockwise/Layout';
 import LetterlockLayout from '@/components/Letterlock/Layout';
+import EloraLayout from '@/components/Elora/Layout';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 
@@ -12,9 +14,11 @@ export default function App({ Component, pageProps }: AppProps) {
   const [loggedIn, setLoggedIn] = useState(false);
 
   useEffect(() => {
-    const checkLoggedIn = async (): Promise<void> => {
-      const isAuthPage = router.pathname.startsWith('/login')
+    if (router.pathname.startsWith('/login')) {
+      return
+    }
 
+    const checkLoggedIn = async (): Promise<void> => {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: {
@@ -30,7 +34,7 @@ export default function App({ Component, pageProps }: AppProps) {
     }
 
     checkLoggedIn();
-  }, [router]);
+  }, [router.pathname]);
   
   if (loggedIn) {
     if (router.pathname.startsWith('/stockwise')) {
@@ -44,6 +48,12 @@ export default function App({ Component, pageProps }: AppProps) {
         <LetterlockLayout>
           <Component {...pageProps} />
         </LetterlockLayout>
+      );
+    } else if (router.pathname.startsWith('/elora')) {
+      return (
+        <EloraLayout>
+          <Component {...pageProps} />
+        </EloraLayout>
       );
     }
 

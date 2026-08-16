@@ -18,4 +18,4 @@
 
 [functions]
   directory = "functions"
-  included_files = ["database/client.ts"]
+  included_files = ["database/client.ts", "database/elora-client.ts"]
