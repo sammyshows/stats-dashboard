@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import InsightBanner from '@/components/Elora/Dashboard/InsightBanner'
 import ComparisonChart from '@/components/Elora/Dashboard/ComparisonChart'
+import CategoryClicksCard from '@/components/Elora/Dashboard/CategoryClicksCard'
+import EntityAnalysesCard from '@/components/Elora/Dashboard/EntityAnalysesCard'
+import DemoFunnelCard from '@/components/Elora/Dashboard/DemoFunnelCard'
+import DualMetricCard from '@/components/Elora/Dashboard/DualMetricCard'
 import TopUsersTable from '@/components/Elora/Dashboard/TopUsersTable'
 import Spinner from '@/components/Utility/Spinner'
 
@@ -68,6 +72,38 @@ export default function EloraDashboard() {
               color="#34d399"
               week={data.activeChatUsers.week}
               month={data.activeChatUsers.month}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <DualMetricCard
+              title="Explore Limits Reached"
+              subtitle="7d explore message limit"
+              icon="🚫"
+              color="#fb7185"
+              total={data.exploreLimits.total}
+              totalLabel="Total"
+              uniqueUsers={data.exploreLimits.uniqueUsers}
+              users={data.exploreLimits.users}
+            />
+            <DemoFunnelCard
+              starters={data.demoFunnel.starters}
+              completion={data.demoFunnel.completion}
+              steps={data.demoFunnel.steps}
+              starterUsers={data.demoFunnel.starterUsers}
+              color="#22d3ee"
+            />
+            <EntityAnalysesCard
+              totalViews={data.entityAnalyses.totalViews}
+              uniqueUsers={data.entityAnalyses.uniqueUsers}
+              users={data.entityAnalyses.users}
+              color="#fbbf24"
+            />
+            <CategoryClicksCard
+              uniqueUsers={data.categoryClicks.uniqueUsers}
+              categories={data.categoryClicks.categories}
+              users={data.categoryClicks.users}
+              color="#e879f9"
             />
           </div>
 
