@@ -28,32 +28,78 @@ const handler: Handler = async (event, context) => {
     FROM explore_chat_messages m INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
     WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false
     AND c.deleted = false AND m.created_at >= date_trunc('month', now());`
-  const totalUsers = await client`
-    SELECT COUNT(DISTINCT user_id) AS count FROM journal_entries;`
-  const recentThemes = await client`
-    SELECT title, emoji, ai_summary
-    FROM journal_entries
-    WHERE title IS NOT NULL AND title <> '' AND emoji IS NOT NULL
-    ORDER BY created_at DESC LIMIT 15;`
-  const topEntryUsers = await client`
-    SELECT user_id, COUNT(*) AS total
-    FROM journal_entries WHERE created_at >= date_trunc('week', now())
-    GROUP BY user_id ORDER BY total DESC LIMIT 5;`
-  const latestTimelines = await client`
-    SELECT timeline->>'theme' AS theme, timeline->>'briefSummary' AS summary
-    FROM timelines
-    WHERE deleted = false AND timeline->>'theme' IS NOT NULL
-    ORDER BY created_at DESC LIMIT 5;`
+  const activeJournalWeek = await client`
+    SELECT COUNT(DISTINCT user_id) AS count FROM journal_entries
+    WHERE created_at >= date_trunc('week', now());`
+
+  // Aggregate platform/logging stats only - never any personal entry content.
+  const categoryTaps = await client`
+    SELECT COUNT(*) AS count FROM logs
+    WHERE log_type_id = 714 AND user_id IS NOT NULL
+      AND timestamp >= date_trunc('week', now());`
+  const entityViews = await client`
+    SELECT COUNT(*) AS count FROM logs
+    WHERE log_type_id = 727 AND user_id IS NOT NULL
+      AND timestamp >= date_trunc('week', now());`
+  const timelineOpens = await client`
+    SELECT COUNT(*) AS count FROM logs
+    WHERE log_type_id = 709 AND user_id IS NOT NULL
+      AND timestamp >= date_trunc('week', now());`
+  const timelineEvents = await client`
+    SELECT COUNT(*) AS count FROM logs
+    WHERE log_type_id = 710 AND user_id IS NOT NULL
+      AND timestamp >= date_trunc('week', now());`
+  const timelineGens = await client`
+    SELECT
+      (SELECT COUNT(*) FROM logs WHERE log_type_id = 706 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS started,
+      (SELECT COUNT(*) FROM logs WHERE log_type_id = 707 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS succeeded,
+      (SELECT COUNT(*) FROM logs WHERE log_type_id = 708 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS failed;`
+  const demoStarts = await client`
+    SELECT
+      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS starters,
+      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 522 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS completions;`
+  const exploreLimits = await client`
+    SELECT
+      (SELECT COUNT(*) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS events,
+      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+         AND timestamp >= date_trunc('week', now())) AS users;`
 
   const data = {
     entries: { week: toNum(entryWeek[0]?.count), month: toNum(entryMonth[0]?.count) },
+    activeJournalUsers: toNum(activeJournalWeek[0]?.count),
     chats: { week: toNum(chatWeek[0]?.count), month: toNum(chatMonth[0]?.count) },
-    activeUsers: { week: toNum(activeWeek[0]?.count), month: toNum(activeMonth[0]?.count) },
-    totalUsers: toNum(totalUsers[0]?.count),
-    recentThemes: recentThemes.map((t: any) => ({ title: t.title, emoji: t.emoji, summary: t.ai_summary })),
-    topEntryUsers: topEntryUsers.map((u: any) => ({ user_id: u.user_id, entries: toNum(u.total) })),
-    timelines: latestTimelines.map((t: any) => ({ theme: t.theme, summary: t.summary })),
+    activeChatUsers: { week: toNum(activeWeek[0]?.count), month: toNum(activeMonth[0]?.count) },
+    categoryTaps: toNum(categoryTaps[0]?.count),
+    entityViews: toNum(entityViews[0]?.count),
+    timelineOpens: toNum(timelineOpens[0]?.count),
+    timelineEvents: toNum(timelineEvents[0]?.count),
+    timelineGens: {
+      started: toNum(timelineGens[0]?.started),
+      succeeded: toNum(timelineGens[0]?.succeeded),
+      failed: toNum(timelineGens[0]?.failed),
+    },
+    demo: {
+      starters: toNum(demoStarts[0]?.starters),
+      completions: toNum(demoStarts[0]?.completions),
+    },
+    exploreLimits: {
+      events: toNum(exploreLimits[0]?.events),
+      users: toNum(exploreLimits[0]?.users),
+    },
   }
+
+  const genRate = data.timelineGens.started > 0
+    ? Math.round((data.timelineGens.succeeded / data.timelineGens.started) * 1000) / 10
+    : 0
+  const demoRate = data.demo.starters > 0
+    ? Math.round((data.demo.completions / data.demo.starters) * 1000) / 10
+    : 0
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -66,23 +112,19 @@ const handler: Handler = async (event, context) => {
       body: JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         max_tokens: 800,
-        system: "You analyze app usage data and return key observations. Be concise and insightful. Focus on interesting trends, anomalies, and user behavior patterns. Your tone is analytical but engaging, like a sharp data analyst presenting to the product team.",
+        system: "You analyze app usage analytics and return key observations. Be concise and insightful. Focus on aggregate trends, anomalies, and platform-level engagement patterns. Your tone is analytical but engaging, like a sharp data analyst presenting to the product team. PRIVACY: Never reference, speculate about, or quote any individual user's private journal entries, personal themes, or private content. Only ever discuss aggregated, anonymized metrics and product trends.",
         messages: [{
           role: "user",
-          content: `Here is Elora app dashboard data for the current period:
+          content: `Here is Elora app analytics data for the current week (aggregate only, no private content):
 
-Journal entries: ${data.entries.week} this week, ${data.entries.month} this month.
-User chat messages: ${data.chats.week} this week, ${data.chats.month} this month.
-Active chat users: ${data.activeUsers.week} this week, ${data.activeUsers.month} this month.
-Total users with entries: ${data.totalUsers}.
+Journal: ${data.entries.week} entries this week, ${data.entries.month} this month; ${data.activeJournalUsers} active journal users this week.
+Explore chat: ${data.chats.week} user messages this week, ${data.chats.month} this month; ${data.activeChatUsers.week} active chat users this week, ${data.activeChatUsers.month} this month.
+Insights: ${data.categoryTaps} category taps, ${data.entityViews} full analysis views this week.
+Timelines: ${data.timelineOpens} opened, ${data.timelineEvents} events viewed, ${data.timelineGens.started} generation attempts (${data.timelineGens.succeeded} succeeded, ${data.timelineGens.failed} failed) = ${genRate}% success rate.
+Onboarding demo: ${data.demo.starters} starters, ${data.demo.completions} completions = ${demoRate}% completion.
+Explore limits: ${data.exploreLimits.events} limit-reached events from ${data.exploreLimits.users} users this week.
 
-Recent entry themes: ${data.recentThemes.map((t: any) => `${t.emoji} ${t.title}`).join('; ') || 'none'}.
-
-Top entry creators this week: ${data.topEntryUsers.map((u: any) => `User ${u.user_id.slice(0, 8)}... (${u.entries} entries)`).join(', ') || 'none'}.
-
-Recent timeline themes: ${data.timelines.map((t: any) => t.theme).join(', ') || 'none'}.
-
-Return a JSON array of exactly 3-5 interesting observations about this data. Each observation should have: "title" (short, 3-7 words), "emoji" (single relevant emoji), and "body" (2-3 sentences explaining the insight). Do NOT wrap in markdown code blocks. Return ONLY valid JSON array.`
+Return a JSON array of exactly 3-5 interesting observations about this aggregate data. Each observation should have: "title" (short, 3-7 words), "emoji" (single relevant emoji), and "body" (2-3 sentences explaining the insight). Only comment on aggregated stats and product trends. Do NOT comment on or reference any individual user's private journal entries, themes, or content. Do NOT wrap in markdown code blocks. Return ONLY valid JSON array.`
         }],
       }),
     })
