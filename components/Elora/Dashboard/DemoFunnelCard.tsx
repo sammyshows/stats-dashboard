@@ -15,9 +15,12 @@ interface CompletionData {
   ratePct: number
 }
 
-export default function DemoFunnelCard({ starters, completion, steps, starterUsers, color }: {
+interface SkippedData { count: number; prior: number; pct: number }
+
+export default function DemoFunnelCard({ starters, completion, skipped, steps, starterUsers, color }: {
   starters: { count: number; prior: number; pct: number }
   completion: CompletionData
+  skipped: SkippedData
   steps: StepStat[]
   starterUsers: UserRef[]
   color: string
@@ -30,12 +33,12 @@ export default function DemoFunnelCard({ starters, completion, steps, starterUse
       <div className="flex items-center gap-3 mb-4">
         <div className="w-9 h-9 rounded-xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-lg">🎯</div>
         <div>
-          <h3 className="text-base font-semibold text-slate-100">Demo Completion + Funnel</h3>
-          <p className="text-[0.65rem] text-slate-500">7d onboarding flow</p>
+          <h3 className="text-base font-semibold text-slate-100">Demo Completion</h3>
+          <p className="text-[0.65rem] text-slate-500">7d onboarding flow · skips excluded from completion</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-3 gap-4 mb-5">
         <div>
           <div className="flex items-center justify-between mb-2">
             <button
@@ -59,7 +62,7 @@ export default function DemoFunnelCard({ starters, completion, steps, starterUse
         </div>
         <div>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-medium">Completion</span>
+            <span className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-medium">Completed</span>
             <DeltaBadge pct={completion.pct} current={completion.week} prior={completion.prior} />
           </div>
           <span className="text-3xl font-bold text-white tabular-nums">
@@ -67,10 +70,20 @@ export default function DemoFunnelCard({ starters, completion, steps, starterUse
           </span>
           <span className="text-sm text-slate-500 tabular-nums"> vs {completion.prior.toLocaleString()}</span>
         </div>
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-medium">Skipped</span>
+            <DeltaBadge pct={skipped.pct} current={skipped.count} prior={skipped.prior} />
+          </div>
+          <span className="text-3xl font-bold text-white tabular-nums">
+            <AnimatedNumber value={skipped.count} />
+          </span>
+          <span className="text-sm text-slate-500 tabular-nums"> vs {skipped.prior.toLocaleString()}</span>
+        </div>
       </div>
 
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-medium">Completion rate</span>
+        <span className="text-[0.65rem] uppercase tracking-widest text-slate-400 font-medium">Completion rate (starters only)</span>
         <DeltaBadge pct={completion.ratePct} current={completion.rate} prior={completion.priorRate} />
       </div>
       <div className="flex items-baseline gap-2 mb-4">

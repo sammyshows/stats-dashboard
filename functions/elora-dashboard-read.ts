@@ -1,5 +1,20 @@
 import { Handler } from "@netlify/functions";
-const client = require("../database/elora-client.ts")
+const rawClient = require("../database/elora-client.ts")
+
+// ---- Performance instrumentation: times every SQL query run by this handler ----
+const queryTimings: { seq: number; ms: number }[] = []
+let querySeq = 0
+
+const client = new Proxy(rawClient, {
+  apply(target: any, thisArg: any, args: any[]) {
+    const start = Date.now()
+    const result = target(...args)
+    const seq = ++querySeq
+    result.then(() => queryTimings.push({ seq, ms: Date.now() - start }))
+    return result
+  },
+})
+// --------------------------------------------------------------------------------
 
 const toNum = (v: any): number => Number(v ?? 0)
 const pctChange = (current: number, prior: number): number => {
@@ -21,87 +36,452 @@ const dailySeries = async (query: ReturnType<typeof client>) => {
 }
 
 const handler: Handler = async (event, context) => {
+  const handlerStart = Date.now()
 
-  const topUsers = await client`
-    SELECT je.user_id,
-           us.id_emoji AS emoji,
-           MAX(je.created_at) AS latest_created_at,
-           COUNT(*) AS total_entry_count
-    FROM journal_entries je
-    LEFT JOIN user_settings us ON us.user_id = je.user_id
-    GROUP BY je.user_id, us.id_emoji
-    ORDER BY latest_created_at DESC
-    LIMIT 10;`
+  // ---- All queries are independent: fire them concurrently ----
+  const settled = await Promise.allSettled([
+    client`
+      SELECT je.user_id,
+             us.id_emoji AS emoji,
+             MAX(je.created_at) AS latest_created_at,
+             COUNT(*) AS total_entry_count
+      FROM journal_entries je
+      LEFT JOIN user_settings us ON us.user_id = je.user_id
+      GROUP BY je.user_id, us.id_emoji
+      ORDER BY latest_created_at DESC
+      LIMIT 10;`,
 
-  const journalUsers = await client`
-    SELECT
-      (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-       WHERE created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
-      (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-       WHERE created_at >= date_trunc('day', now()) - interval '13 days'
-         AND created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
-      (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-       WHERE created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
-      (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-       WHERE created_at >= date_trunc('day', now()) - interval '59 days'
-         AND created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`
+    client`
+      SELECT
+        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
+        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '13 days'
+           AND created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
+        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
+        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '59 days'
+           AND created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`,
 
-  const journalDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT created_at::date AS day, COUNT(DISTINCT user_id)::int AS count
-      FROM journal_entries WHERE created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY created_at::date
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT created_at::date AS day, COUNT(DISTINCT user_id)::int AS count
+        FROM journal_entries WHERE created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY created_at::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT DISTINCT je.user_id, us.id_emoji AS emoji
+      FROM journal_entries je
+      LEFT JOIN user_settings us ON us.user_id = je.user_id
+      WHERE je.created_at >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY je.user_id;`,
+
+    client`
+      SELECT
+        (SELECT COUNT(*) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
+        (SELECT COUNT(*) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '13 days'
+           AND created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
+        (SELECT COUNT(*) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
+        (SELECT COUNT(*) FROM journal_entries
+         WHERE created_at >= date_trunc('day', now()) - interval '59 days'
+           AND created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT created_at::date AS day, COUNT(*)::int AS count
+        FROM journal_entries WHERE created_at >= date_trunc('day', now()) - interval '59 days'
+        GROUP BY created_at::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT je.user_id, us.id_emoji AS emoji, COUNT(*)::int AS entry_count
+      FROM journal_entries je
+      LEFT JOIN user_settings us ON us.user_id = je.user_id
+      WHERE je.created_at >= date_trunc('day', now()) - interval '6 days'
+      GROUP BY je.user_id, us.id_emoji
+      ORDER BY entry_count DESC;`,
+
+    // Voice/transcription users (ai_logs type 1) who ALSO wrote ≥1 entry in the same window.
+    client`
+      SELECT
+        (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
+         WHERE v.log_type_id = 1
+           AND v.created_at >= date_trunc('day', now()) - interval '6 days'
+           AND EXISTS (SELECT 1 FROM journal_entries je
+                       WHERE je.user_id = v.user_id
+                         AND je.created_at >= date_trunc('day', now()) - interval '6 days')) AS this_week,
+        (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
+         WHERE v.log_type_id = 1
+           AND v.created_at >= date_trunc('day', now()) - interval '13 days'
+           AND v.created_at < date_trunc('day', now()) - interval '6 days'
+           AND EXISTS (SELECT 1 FROM journal_entries je
+                       WHERE je.user_id = v.user_id
+                         AND je.created_at >= date_trunc('day', now()) - interval '13 days'
+                           AND je.created_at < date_trunc('day', now()) - interval '6 days')) AS prior_week,
+        (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
+         WHERE v.log_type_id = 1
+           AND v.created_at >= date_trunc('day', now()) - interval '29 days'
+           AND EXISTS (SELECT 1 FROM journal_entries je
+                       WHERE je.user_id = v.user_id
+                         AND je.created_at >= date_trunc('day', now()) - interval '29 days')) AS this_month,
+        (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
+         WHERE v.log_type_id = 1
+           AND v.created_at >= date_trunc('day', now()) - interval '59 days'
+           AND v.created_at < date_trunc('day', now()) - interval '29 days'
+           AND EXISTS (SELECT 1 FROM journal_entries je
+                       WHERE je.user_id = v.user_id
+                         AND je.created_at >= date_trunc('day', now()) - interval '59 days'
+                           AND je.created_at < date_trunc('day', now()) - interval '29 days')) AS prior_month;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT v.day, COUNT(DISTINCT v.user_id)::int AS count FROM (
+          SELECT DISTINCT date_trunc('day', v.created_at)::date AS day, v.user_id
+          FROM ai_logs v
+          WHERE v.log_type_id = 1
+            AND v.created_at >= date_trunc('day', now()) - interval '59 days'
+            AND EXISTS (SELECT 1 FROM journal_entries je
+                        WHERE je.user_id = v.user_id
+                          AND date_trunc('day', je.created_at)::date = date_trunc('day', v.created_at)::date)
+        ) v GROUP BY v.day
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT DISTINCT v.user_id, us.id_emoji AS emoji
+      FROM ai_logs v
+      LEFT JOIN user_settings us ON us.user_id = v.user_id
+      WHERE v.log_type_id = 1
+        AND v.created_at >= date_trunc('day', now()) - interval '6 days'
+        AND EXISTS (SELECT 1 FROM journal_entries je
+                    WHERE je.user_id = v.user_id
+                      AND je.created_at >= date_trunc('day', now()) - interval '6 days')
+      ORDER BY v.user_id;`,
+
+    client`
+      SELECT
+        (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
+         INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
+         WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
+           AND m.created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
+        (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
+         INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
+         WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
+           AND m.created_at >= date_trunc('day', now()) - interval '13 days'
+           AND m.created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
+        (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
+         INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
+         WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
+           AND m.created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
+        (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
+         INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
+         WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
+           AND m.created_at >= date_trunc('day', now()) - interval '59 days'
+           AND m.created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT m.created_at::date AS day, COUNT(DISTINCT c.user_id)::int AS count
+        FROM explore_chat_messages m INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
+        WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
+          AND m.created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY m.created_at::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT c.user_id, us.id_emoji AS emoji, COUNT(*)::int AS message_count
+      FROM explore_chat_messages m
+      INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
+      LEFT JOIN user_settings us ON us.user_id = c.user_id
+      WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false
+        AND c.deleted = false AND c.user_id IS NOT NULL
+        AND m.created_at >= date_trunc('day', now()) - interval '6 days'
+      GROUP BY c.user_id, us.id_emoji
+      ORDER BY c.user_id;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT created_at::date AS day, COUNT(*)::int AS count FROM explore_chat_messages
+        WHERE role = 'user' AND deleted = false AND hidden = false AND compacted = false
+          AND created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY created_at::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT title, emoji, ai_summary, TO_CHAR(created_at, 'DD/MM/YYYY') AS created_date
+      FROM journal_entries
+      WHERE title IS NOT NULL AND title <> '' AND emoji IS NOT NULL AND created_at >= now() - interval '7 days'
+      ORDER BY created_at DESC LIMIT 8;`,
+
+    client`
+      SELECT
+        (SELECT COUNT(DISTINCT user_id) FROM logs
+         WHERE log_type_id = 714 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS this_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs
+         WHERE log_type_id = 714 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS prior_week;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
+        FROM logs WHERE log_type_id = 714 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        GROUP BY timestamp::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT SPLIT_PART(notes, '|', 1) AS category_key,
+             COUNT(*) FILTER (WHERE timestamp >= date_trunc('day', now()) - interval '6 days') AS this_week,
+             COUNT(*) FILTER (WHERE timestamp >= date_trunc('day', now()) - interval '13 days'
+                              AND timestamp < date_trunc('day', now()) - interval '6 days') AS prior_week
+      FROM logs
+      WHERE log_type_id = 714 AND user_id IS NOT NULL
+        AND timestamp >= date_trunc('day', now()) - interval '13 days'
+      GROUP BY 1;`,
+
+    client`
+      SELECT
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS views_week,
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS views_prior,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS users_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS users_prior;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT timestamp::date AS day, COUNT(*)::int AS count
+        FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        GROUP BY timestamp::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
+        FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        GROUP BY timestamp::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS events_week,
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS events_prior,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS users_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS users_prior;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT timestamp::date AS day, COUNT(*)::int AS count
+        FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        GROUP BY timestamp::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
+        FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        GROUP BY timestamp::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS this_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS prior_week;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 714 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 727 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 422 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 520 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
+        FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        GROUP BY timestamp::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    client`
+      SELECT COUNT(DISTINCT user_id) AS completed FROM logs
+      WHERE user_id IS NOT NULL
+        AND timestamp >= date_trunc('day', now()) - interval '6 days'
+        AND (log_type_id = 522 OR (log_type_id = 521 AND notes = '11'))
+        AND user_id IN (SELECT DISTINCT user_id FROM logs
+          WHERE log_type_id = 520 AND user_id IS NOT NULL
+            AND timestamp >= date_trunc('day', now()) - interval '6 days')
+        AND user_id NOT IN (SELECT user_id FROM logs
+          WHERE log_type_id = 535 AND user_id IS NOT NULL
+            AND timestamp >= date_trunc('day', now()) - interval '6 days');`,
+
+    client`
+      SELECT COUNT(DISTINCT user_id) AS completed FROM logs
+      WHERE user_id IS NOT NULL
+        AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        AND timestamp < date_trunc('day', now()) - interval '6 days'
+        AND (log_type_id = 522 OR (log_type_id = 521 AND notes = '11'))
+        AND user_id IN (SELECT DISTINCT user_id FROM logs
+          WHERE log_type_id = 520 AND user_id IS NOT NULL
+            AND timestamp >= date_trunc('day', now()) - interval '13 days'
+            AND timestamp < date_trunc('day', now()) - interval '6 days')
+        AND user_id NOT IN (SELECT user_id FROM logs
+          WHERE log_type_id = 535 AND user_id IS NOT NULL
+            AND timestamp >= date_trunc('day', now()) - interval '13 days'
+            AND timestamp < date_trunc('day', now()) - interval '6 days');`,
+
+    client`
+      SELECT COUNT(DISTINCT user_id) AS skipped FROM logs
+      WHERE log_type_id = 535 AND user_id IS NOT NULL
+        AND timestamp >= date_trunc('day', now()) - interval '6 days';`,
+
+    client`
+      SELECT COUNT(DISTINCT user_id) AS skipped FROM logs
+      WHERE log_type_id = 535 AND user_id IS NOT NULL
+        AND timestamp >= date_trunc('day', now()) - interval '13 days'
+        AND timestamp < date_trunc('day', now()) - interval '6 days';`,
+
+    client`
+      SELECT user_id, MAX(CASE WHEN notes ~ '^[0-9]+$' THEN notes::int END) AS max_step
+      FROM (
+        -- Real progression: the furthest step reached via DEMO_STEP_REACHED (521).
+        SELECT user_id, notes FROM logs
+        WHERE log_type_id = 521 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '6 days'
+        UNION ALL
+        -- Skippers: cap their funnel contribution at the step they were on when they
+        -- tapped Skip (535 notes = current step). Exclude the spurious '11' that
+        -- completeOnboarding logs on skip.
+        SELECT user_id, COALESCE(NULLIF(REGEXP_REPLACE(notes, '[^0-9]', '', 'g'), ''), '0') AS notes
+        FROM logs
+        WHERE log_type_id = 535 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '6 days'
+      ) t
+      GROUP BY user_id;`,
+
+    // Timeline created (707 = generation succeeded) and opened (709).
+    client`
+      SELECT
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 707 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS created_week,
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 707 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS created_prior,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 707 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS created_users_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 707 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS created_users_prior,
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 709 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS viewed_week,
+        (SELECT COUNT(*) FROM logs WHERE log_type_id = 709 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS viewed_prior,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 709 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS viewed_users_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 709 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS viewed_users_prior;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 707 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 709 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+  ])
+
+  const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily,
+    totalEntryUsers, voiceEntryUsers, voiceEntryUsersDaily, voiceEntryUserList,
+    chatUsers, chatUsersDaily, activeChatUserList, messagesDaily, insights,
+    categoryClicksUsers, categoryClicksDaily, categoryBreakdown, entityViews, entityViewsDaily,
+    entityUsersDaily, exploreLimits, exploreLimitsDaily, exploreUsersDaily, demoSessions,
+    categoryClickUsers, entityViewUsers, exploreLimitUsers, demoStarterUsers, demoStartersDaily,
+    demoCompletedWeek, demoCompletedPrior, demoSkippedWeek, demoSkippedPrior, demoSegments,
+    timelineActivity, timelineCreatorUsers, timelineViewerUsers] = settled.map((r: any) =>
+      r.status === 'fulfilled' ? r.value : []
     )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const chatUsers = await client`
-    SELECT
-      (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
-       INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
-       WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
-         AND m.created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
-      (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
-       INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
-       WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
-         AND m.created_at >= date_trunc('day', now()) - interval '13 days'
-         AND m.created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
-      (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
-       INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
-       WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
-         AND m.created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
-      (SELECT COUNT(DISTINCT c.user_id) FROM explore_chat_messages m
-       INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
-       WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
-         AND m.created_at >= date_trunc('day', now()) - interval '59 days'
-         AND m.created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`
-
-  const chatUsersDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT m.created_at::date AS day, COUNT(DISTINCT c.user_id)::int AS count
-      FROM explore_chat_messages m INNER JOIN explore_chats c ON c.explore_chat_id = m.explore_chat_id
-      WHERE m.role = 'user' AND m.deleted = false AND m.hidden = false AND m.compacted = false AND c.deleted = false
-        AND m.created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY m.created_at::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const messagesDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT created_at::date AS day, COUNT(*)::int AS count FROM explore_chat_messages
-      WHERE role = 'user' AND deleted = false AND hidden = false AND compacted = false
-        AND created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY created_at::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const insights = await client`
-    SELECT title, emoji, ai_summary, TO_CHAR(created_at, 'DD/MM/YYYY') AS created_date
-    FROM journal_entries
-    WHERE title IS NOT NULL AND title <> '' AND emoji IS NOT NULL AND created_at >= now() - interval '7 days'
-    ORDER BY created_at DESC LIMIT 8;`
 
   // ====== Insights engagement & demo funnel (from logs table) ======
   const CATEGORY_LABELS: Record<string, string> = {
@@ -112,187 +492,6 @@ const handler: Handler = async (event, context) => {
     commitmentsAndProgress: 'Commitments',
     milestonesAndHighlights: 'Milestones',
   }
-
-  const categoryClicksUsers = await client`
-    SELECT
-      (SELECT COUNT(DISTINCT user_id) FROM logs
-       WHERE log_type_id = 714 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '6 days') AS this_week,
-      (SELECT COUNT(DISTINCT user_id) FROM logs
-       WHERE log_type_id = 714 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '13 days'
-         AND timestamp < date_trunc('day', now()) - interval '6 days') AS prior_week;`
-
-  const categoryClicksDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
-      FROM logs WHERE log_type_id = 714 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      GROUP BY timestamp::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const categoryBreakdown = await client`
-    SELECT SPLIT_PART(notes, '|', 1) AS category_key,
-           COUNT(*) FILTER (WHERE timestamp >= date_trunc('day', now()) - interval '6 days') AS this_week,
-           COUNT(*) FILTER (WHERE timestamp >= date_trunc('day', now()) - interval '13 days'
-                            AND timestamp < date_trunc('day', now()) - interval '6 days') AS prior_week
-    FROM logs
-    WHERE log_type_id = 714 AND user_id IS NOT NULL
-      AND timestamp >= date_trunc('day', now()) - interval '13 days'
-    GROUP BY 1;`
-
-  const entityViews = await client`
-    SELECT
-      (SELECT COUNT(*) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '6 days') AS views_week,
-      (SELECT COUNT(*) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '13 days'
-         AND timestamp < date_trunc('day', now()) - interval '6 days') AS views_prior,
-      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '6 days') AS users_week,
-      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '13 days'
-         AND timestamp < date_trunc('day', now()) - interval '6 days') AS users_prior;`
-
-  const entityViewsDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT timestamp::date AS day, COUNT(*)::int AS count
-      FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      GROUP BY timestamp::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const entityUsersDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
-      FROM logs WHERE log_type_id = 727 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      GROUP BY timestamp::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const exploreLimits = await client`
-    SELECT
-      (SELECT COUNT(*) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '6 days') AS events_week,
-      (SELECT COUNT(*) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '13 days'
-         AND timestamp < date_trunc('day', now()) - interval '6 days') AS events_prior,
-      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '6 days') AS users_week,
-      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '13 days'
-         AND timestamp < date_trunc('day', now()) - interval '6 days') AS users_prior;`
-
-  const exploreLimitsDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT timestamp::date AS day, COUNT(*)::int AS count
-      FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      GROUP BY timestamp::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const exploreUsersDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
-      FROM logs WHERE log_type_id = 422 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      GROUP BY timestamp::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const demoSessions = await client`
-    SELECT
-      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '6 days') AS this_week,
-      (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
-         AND timestamp >= date_trunc('day', now()) - interval '13 days'
-         AND timestamp < date_trunc('day', now()) - interval '6 days') AS prior_week;`
-
-  const categoryClickUsers = await client`
-    SELECT DISTINCT l.user_id, us.id_emoji AS emoji
-    FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
-    WHERE l.log_type_id = 714 AND l.user_id IS NOT NULL
-      AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
-    ORDER BY l.user_id;`
-
-  const entityViewUsers = await client`
-    SELECT DISTINCT l.user_id, us.id_emoji AS emoji
-    FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
-    WHERE l.log_type_id = 727 AND l.user_id IS NOT NULL
-      AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
-    ORDER BY l.user_id;`
-
-  const exploreLimitUsers = await client`
-    SELECT DISTINCT l.user_id, us.id_emoji AS emoji
-    FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
-    WHERE l.log_type_id = 422 AND l.user_id IS NOT NULL
-      AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
-    ORDER BY l.user_id;`
-
-  const demoStarterUsers = await client`
-    SELECT DISTINCT l.user_id, us.id_emoji AS emoji
-    FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
-    WHERE l.log_type_id = 520 AND l.user_id IS NOT NULL
-      AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
-    ORDER BY l.user_id;`
-
-  const demoStartersDaily = await dailySeries(client`
-    WITH days AS (
-      SELECT generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day')::date AS day
-    ), daily AS (
-      SELECT timestamp::date AS day, COUNT(DISTINCT user_id)::int AS count
-      FROM logs WHERE log_type_id = 520 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      GROUP BY timestamp::date
-    )
-    SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`)
-
-  const demoCompletedWeek = await client`
-    SELECT COUNT(DISTINCT user_id) AS completed FROM logs
-    WHERE user_id IS NOT NULL
-      AND timestamp >= date_trunc('day', now()) - interval '6 days'
-      AND (log_type_id = 522 OR (log_type_id = 521 AND notes = '11'))
-      AND user_id IN (SELECT DISTINCT user_id FROM logs
-        WHERE log_type_id = 520 AND user_id IS NOT NULL
-          AND timestamp >= date_trunc('day', now()) - interval '6 days');`
-
-  const demoCompletedPrior = await client`
-    SELECT COUNT(DISTINCT user_id) AS completed FROM logs
-    WHERE user_id IS NOT NULL
-      AND timestamp >= date_trunc('day', now()) - interval '13 days'
-      AND timestamp < date_trunc('day', now()) - interval '6 days'
-      AND (log_type_id = 522 OR (log_type_id = 521 AND notes = '11'))
-      AND user_id IN (SELECT DISTINCT user_id FROM logs
-        WHERE log_type_id = 520 AND user_id IS NOT NULL
-          AND timestamp >= date_trunc('day', now()) - interval '13 days'
-          AND timestamp < date_trunc('day', now()) - interval '6 days');`
-
-  const demoSegments = await client`
-    SELECT user_id, MAX(CASE WHEN notes ~ '^[0-9]+$' THEN notes::int END) AS max_step
-    FROM (
-      SELECT user_id, notes FROM logs
-      WHERE log_type_id = 521 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '6 days'
-      UNION ALL
-      SELECT user_id, '11' FROM logs
-      WHERE log_type_id = 522 AND user_id IS NOT NULL
-        AND timestamp >= date_trunc('day', now()) - interval '6 days'
-    ) t
-    GROUP BY user_id;`
 
   const ju = journalUsers[0]; const cu = chatUsers[0]
 
@@ -320,6 +519,11 @@ const handler: Handler = async (event, context) => {
   const ev = entityViews[0]
   const el = exploreLimits[0]
   const demo = demoSessions[0]
+  const te = totalEntries[0]
+  const vu = voiceEntryUsers[0]
+  const skippedWeek = toNum(demoSkippedWeek[0]?.skipped)
+  const skippedPrior = toNum(demoSkippedPrior[0]?.skipped)
+  const tl = timelineActivity[0]
   const startersWeek = toNum(demo?.this_week)
   const startersPrior = toNum(demo?.prior_week)
   const completedWeek = toNum(demoCompletedWeek[0]?.completed)
@@ -347,6 +551,17 @@ const handler: Handler = async (event, context) => {
       activeJournalUsers: {
         week: build(ju?.this_week, ju?.prior_week, journalDaily, 7),
         month: build(ju?.this_month, ju?.prior_month, journalDaily, 30),
+        users: activeJournalUserList.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
+      },
+      totalEntries: {
+        week: build(te?.this_week, te?.prior_week, totalEntriesDaily, 7),
+        month: build(te?.this_month, te?.prior_month, totalEntriesDaily, 30),
+        users: totalEntryUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null, metric: toNum(u.entry_count) })),
+      },
+      voiceEntryUsers: {
+        week: build(vu?.this_week, vu?.prior_week, voiceEntryUsersDaily, 7),
+        month: build(vu?.this_month, vu?.prior_month, voiceEntryUsersDaily, 30),
+        users: voiceEntryUserList.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
       },
       chatMessages: {
         week: { count: msgWeekCurrent, prior: msgWeekPrior, pct: pctChange(msgWeekCurrent, msgWeekPrior), series: { current: messagesDaily.slice(53), prior: messagesDaily.slice(46, 53) } },
@@ -355,6 +570,7 @@ const handler: Handler = async (event, context) => {
       activeChatUsers: {
         week: build(cu?.this_week, cu?.prior_week, chatUsersDaily, 7),
         month: build(cu?.this_month, cu?.prior_month, chatUsersDaily, 30),
+        users: activeChatUserList.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null, metric: toNum(u.message_count) })),
       },
       categoryClicks: {
         uniqueUsers: build(ccUsers?.this_week, ccUsers?.prior_week, categoryClicksDaily, 7),
@@ -382,7 +598,26 @@ const handler: Handler = async (event, context) => {
           priorRate: startersPrior > 0 ? Math.round((completedPrior / startersPrior) * 1000) / 10 : 0,
           ratePct: startersPrior > 0 ? pctChange(Math.round((completedWeek / startersWeek) * 1000) / 10, Math.round((completedPrior / startersPrior) * 1000) / 10) : startersWeek > 0 ? 100 : 0,
         },
+        skipped: {
+          count: skippedWeek,
+          prior: skippedPrior,
+          pct: pctChange(skippedWeek, skippedPrior),
+        },
         steps: funnelSteps,
+      },
+      timelineActivity: {
+        created: {
+          count: toNum(tl?.created_week),
+          prior: toNum(tl?.created_prior),
+          pct: pctChange(toNum(tl?.created_week), toNum(tl?.created_prior)),
+          users: timelineCreatorUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
+        },
+        viewed: {
+          count: toNum(tl?.viewed_week),
+          prior: toNum(tl?.viewed_prior),
+          pct: pctChange(toNum(tl?.viewed_week), toNum(tl?.viewed_prior)),
+          users: timelineViewerUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
+        },
       },
       insights: insights.map((i: any) => ({
         insight_title: i.title,
@@ -390,6 +625,15 @@ const handler: Handler = async (event, context) => {
         insight_summary: i.ai_summary,
         created_date: i.created_date,
       })),
+      _perf: (() => {
+        const totalMs = Date.now() - handlerStart
+        const sorted = [...queryTimings].sort((a, b) => b.ms - a.ms)
+        if (process.env.NETLIFY_DEV === 'true' || process.env.NODE_ENV !== 'production') {
+          console.log(`[perf] handler total: ${totalMs}ms across ${queryTimings.length} queries`)
+          console.log(`[perf] slowest: ${sorted.slice(0, 5).map((q) => `#${q.seq} ${q.ms}ms`).join(', ')}`)
+        }
+        return { totalMs, queries: queryTimings.length, slowest: sorted.slice(0, 5) }
+      })(),
     }),
     statusCode: 200
   }

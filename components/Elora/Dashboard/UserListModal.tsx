@@ -6,10 +6,11 @@ export interface UserRef { user_id: string; emoji: string | null }
 
 const shortId = (id: string) => '...' + id.slice(-12)
 
-export default function UserListModal({ users, title, subtitle, onClose }: {
+export default function UserListModal({ users, title, subtitle, metricLabel, onClose }: {
   users: UserRef[]
   title: string
   subtitle?: string
+  metricLabel?: string
   onClose: () => void
 }) {
   useEffect(() => {
@@ -47,6 +48,12 @@ export default function UserListModal({ users, title, subtitle, onClose }: {
           <div className="p-6 text-sm text-slate-500">No users recorded in this period.</div>
         ) : (
           <div className="grow overflow-y-auto elora-scroll p-4">
+            {metricLabel && (
+              <div className="flex items-center justify-between px-3 py-1.5 text-[0.6rem] uppercase tracking-widest text-slate-500 font-medium">
+                <span>User</span>
+                <span>{metricLabel}</span>
+              </div>
+            )}
             <div className="flex flex-col">
               {users.map((u) => (
                 <Link
@@ -60,7 +67,10 @@ export default function UserListModal({ users, title, subtitle, onClose }: {
                   <span className="text-xs text-violet-400 group-hover:text-violet-300 font-mono font-medium truncate">
                     {shortId(u.user_id)}
                   </span>
-                  <svg className="ml-auto shrink-0 text-slate-600 group-hover:text-slate-400 transition-colors" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <span className="ml-auto text-sm font-semibold text-slate-200 tabular-nums shrink-0">
+                    {metricLabel ? (u as any).metric?.toLocaleString?.() ?? '' : ''}
+                  </span>
+                  <svg className="shrink-0 text-slate-600 group-hover:text-slate-400 transition-colors" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                   </svg>
                 </Link>

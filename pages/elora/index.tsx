@@ -5,6 +5,8 @@ import CategoryClicksCard from '@/components/Elora/Dashboard/CategoryClicksCard'
 import EntityAnalysesCard from '@/components/Elora/Dashboard/EntityAnalysesCard'
 import DemoFunnelCard from '@/components/Elora/Dashboard/DemoFunnelCard'
 import DualMetricCard from '@/components/Elora/Dashboard/DualMetricCard'
+import TimelineActivityCard from '@/components/Elora/Dashboard/TimelineActivityCard'
+import UserListModal from '@/components/Elora/Dashboard/UserListModal'
 import TopUsersTable from '@/components/Elora/Dashboard/TopUsersTable'
 import Spinner from '@/components/Utility/Spinner'
 
@@ -12,6 +14,7 @@ export default function EloraDashboard() {
   const [data, setData] = useState<any>(null)
   const [aiInsights, setAiInsights] = useState<any[]>([])
   const [entryInsights, setEntryInsights] = useState<any[]>([])
+  const [userModal, setUserModal] = useState<null | 'voice' | 'activeChat' | 'activeJournal' | 'totalEntries'>(null)
 
   const refresh = () => {
     fetch('/api/elora-dashboard-read')
@@ -58,6 +61,23 @@ export default function EloraDashboard() {
               color="#a78bfa"
               week={data.activeJournalUsers.week}
               month={data.activeJournalUsers.month}
+              onOpen={() => setUserModal('activeJournal')}
+            />
+            <ComparisonChart
+              title="Total Entries"
+              icon="📄"
+              color="#f472b6"
+              week={data.totalEntries.week}
+              month={data.totalEntries.month}
+              onOpen={() => setUserModal('totalEntries')}
+            />
+            <ComparisonChart
+              title="Voice Entry Users"
+              icon="🎙️"
+              color="#f59e0b"
+              week={data.voiceEntryUsers.week}
+              month={data.voiceEntryUsers.month}
+              onOpen={() => setUserModal('voice')}
             />
             <ComparisonChart
               title="Chat Messages"
@@ -72,13 +92,11 @@ export default function EloraDashboard() {
               color="#34d399"
               week={data.activeChatUsers.week}
               month={data.activeChatUsers.month}
+              onOpen={() => setUserModal('activeChat')}
             />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <DualMetricCard
-              title="Explore Limits Reached"
-              subtitle="7d explore message limit"
+              title="Chat Limits Reached"
+              subtitle="7d chat message limit"
               icon="🚫"
               color="#fb7185"
               total={data.exploreLimits.total}
@@ -86,9 +104,13 @@ export default function EloraDashboard() {
               uniqueUsers={data.exploreLimits.uniqueUsers}
               users={data.exploreLimits.users}
             />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <DemoFunnelCard
               starters={data.demoFunnel.starters}
               completion={data.demoFunnel.completion}
+              skipped={data.demoFunnel.skipped}
               steps={data.demoFunnel.steps}
               starterUsers={data.demoFunnel.starterUsers}
               color="#22d3ee"
@@ -105,10 +127,50 @@ export default function EloraDashboard() {
               users={data.categoryClicks.users}
               color="#e879f9"
             />
+            <TimelineActivityCard
+              created={data.timelineActivity.created}
+              viewed={data.timelineActivity.viewed}
+              color="#a78bfa"
+            />
           </div>
 
           <TopUsersTable users={data.topUsers} onUpdate={refresh} />
         </div>
+      )}
+
+      {userModal === 'voice' && (
+        <UserListModal
+          users={data.voiceEntryUsers.users}
+          title="Voice Entry Users"
+          subtitle={`${data.voiceEntryUsers.week.count.toLocaleString()} unique users · past 7 days`}
+          onClose={() => setUserModal(null)}
+        />
+      )}
+      {userModal === 'activeChat' && (
+        <UserListModal
+          users={data.activeChatUsers.users}
+          title="Active Chat Users"
+          metricLabel="Messages"
+          subtitle={`${data.activeChatUsers.week.count.toLocaleString()} unique users · past 7 days`}
+          onClose={() => setUserModal(null)}
+        />
+      )}
+      {userModal === 'activeJournal' && (
+        <UserListModal
+          users={data.activeJournalUsers.users}
+          title="Active Journal Users"
+          subtitle={`${data.activeJournalUsers.week.count.toLocaleString()} unique users · past 7 days`}
+          onClose={() => setUserModal(null)}
+        />
+      )}
+      {userModal === 'totalEntries' && (
+        <UserListModal
+          users={data.totalEntries.users}
+          title="Users with Entries"
+          metricLabel="Entries"
+          subtitle={`${data.totalEntries.users.length.toLocaleString()} unique users · past 7 days`}
+          onClose={() => setUserModal(null)}
+        />
       )}
     </div>
   )
