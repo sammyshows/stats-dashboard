@@ -6,6 +6,7 @@ import EntityAnalysesCard from '@/components/Elora/Dashboard/EntityAnalysesCard'
 import DemoFunnelCard from '@/components/Elora/Dashboard/DemoFunnelCard'
 import DualMetricCard from '@/components/Elora/Dashboard/DualMetricCard'
 import TimelineActivityCard from '@/components/Elora/Dashboard/TimelineActivityCard'
+import LinkPromptCard from '@/components/Elora/Dashboard/LinkPromptCard'
 import UserListModal from '@/components/Elora/Dashboard/UserListModal'
 import TopUsersTable from '@/components/Elora/Dashboard/TopUsersTable'
 import Spinner from '@/components/Utility/Spinner'
@@ -132,6 +133,7 @@ export default function EloraDashboard() {
               viewed={data.timelineActivity.viewed}
               color="#a78bfa"
             />
+            <LinkPromptCard data={data.linkPrompt} />
           </div>
 
           <TopUsersTable users={data.topUsers} onUpdate={refresh} />

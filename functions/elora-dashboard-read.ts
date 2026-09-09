@@ -470,6 +470,34 @@ const handler: Handler = async (event, context) => {
       WHERE l.log_type_id = 709 AND l.user_id IS NOT NULL
         AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
       ORDER BY l.user_id;`,
+
+    // "Don't lose your entries" link-account prompt (527 shown / 531 linked).
+    client`
+      SELECT
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 527 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS shown_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 527 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS shown_prior,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 531 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '6 days') AS linked_week,
+        (SELECT COUNT(DISTINCT user_id) FROM logs WHERE log_type_id = 531 AND user_id IS NOT NULL
+           AND timestamp >= date_trunc('day', now()) - interval '13 days'
+           AND timestamp < date_trunc('day', now()) - interval '6 days') AS linked_prior;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 527 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
+
+    client`
+      SELECT DISTINCT l.user_id, us.id_emoji AS emoji
+      FROM logs l LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.log_type_id = 531 AND l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      ORDER BY l.user_id;`,
   ])
 
   const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily,
@@ -479,7 +507,8 @@ const handler: Handler = async (event, context) => {
     entityUsersDaily, exploreLimits, exploreLimitsDaily, exploreUsersDaily, demoSessions,
     categoryClickUsers, entityViewUsers, exploreLimitUsers, demoStarterUsers, demoStartersDaily,
     demoCompletedWeek, demoCompletedPrior, demoSkippedWeek, demoSkippedPrior, demoSegments,
-    timelineActivity, timelineCreatorUsers, timelineViewerUsers] = settled.map((r: any) =>
+    timelineActivity, timelineCreatorUsers, timelineViewerUsers,
+    linkPrompt, linkPromptShownUsers, linkPromptLinkedUsers] = settled.map((r: any) =>
       r.status === 'fulfilled' ? r.value : []
     )
 
@@ -618,6 +647,25 @@ const handler: Handler = async (event, context) => {
           pct: pctChange(toNum(tl?.viewed_week), toNum(tl?.viewed_prior)),
           users: timelineViewerUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
         },
+      },
+      linkPrompt: {
+        shown: {
+          count: toNum(linkPrompt?.[0]?.shown_week),
+          prior: toNum(linkPrompt?.[0]?.shown_prior),
+          pct: pctChange(toNum(linkPrompt?.[0]?.shown_week), toNum(linkPrompt?.[0]?.shown_prior)),
+          users: linkPromptShownUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
+        },
+        linked: {
+          count: toNum(linkPrompt?.[0]?.linked_week),
+          prior: toNum(linkPrompt?.[0]?.linked_prior),
+          pct: pctChange(toNum(linkPrompt?.[0]?.linked_week), toNum(linkPrompt?.[0]?.linked_prior)),
+          users: linkPromptLinkedUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
+        },
+        rate: (() => {
+          const shown = toNum(linkPrompt?.[0]?.shown_week)
+          const linked = toNum(linkPrompt?.[0]?.linked_week)
+          return shown > 0 ? Math.round((linked / shown) * 1000) / 10 : 0
+        })(),
       },
       insights: insights.map((i: any) => ({
         insight_title: i.title,

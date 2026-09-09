@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal as reactDomCreatePortal } from 'react-dom'
 import MarkdownView from '@/components/Utility/MarkdownView'
+
+const createPortal: (child: any, container: Element | DocumentFragment) => any = reactDomCreatePortal
 
 interface ChatMessage {
   id: string

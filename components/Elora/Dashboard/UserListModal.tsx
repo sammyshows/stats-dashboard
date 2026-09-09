@@ -1,6 +1,11 @@
 import Link from 'next/link'
 import { useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal as reactDomCreatePortal } from 'react-dom'
+
+// Typed loosely to stay immune to @types/react / @types/react-dom version skew
+// (a duplicated @types/react copy on some installs makes the portal children
+// fall outside the library's ReactNode identity, failing CI type-checks).
+const createPortal: (child: any, container: Element | DocumentFragment) => any = reactDomCreatePortal
 
 export interface UserRef { user_id: string; emoji: string | null }
 
