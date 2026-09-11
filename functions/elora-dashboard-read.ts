@@ -498,6 +498,49 @@ const handler: Handler = async (event, context) => {
       WHERE l.log_type_id = 531 AND l.user_id IS NOT NULL
         AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
       ORDER BY l.user_id;`,
+
+    // App version distribution among users active in the past week
+    // (any log row with a user_id in the window). Versions collapsed to
+    // major.minor: first section before the first '.' + the char right after.
+    client`
+      SELECT CASE
+               WHEN us.app_version IS NULL OR us.app_version = '' THEN 'unknown'
+               WHEN POSITION('.' IN us.app_version) = 0 THEN us.app_version
+               ELSE SPLIT_PART(us.app_version, '.', 1) || '.' || SUBSTRING(SPLIT_PART(us.app_version, '.', 2) FROM 1 FOR 1)
+             END AS app_version,
+             COUNT(DISTINCT l.user_id)::int AS user_count
+      FROM logs l
+      LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+      GROUP BY 1
+      ORDER BY user_count DESC;`,
+
+    // Platform-level active user counts (7d + 30d windows).
+    client`
+      SELECT us.platform,
+             COUNT(DISTINCT l.user_id) FILTER (WHERE l.timestamp >= date_trunc('day', now()) - interval '6 days')::int AS users_7d,
+             COUNT(DISTINCT l.user_id) FILTER (WHERE l.timestamp >= date_trunc('day', now()) - interval '29 days')::int AS users_30d
+      FROM logs l
+      LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.user_id IS NOT NULL
+        AND us.platform IN ('ios', 'android')
+        AND l.timestamp >= date_trunc('day', now()) - interval '29 days'
+      GROUP BY us.platform;`,
+
+    // Device platform + model among active users (7d window), per platform.
+    client`
+      SELECT us.platform,
+             us.device_model AS model,
+             COUNT(DISTINCT l.user_id)::int AS user_count
+      FROM logs l
+      LEFT JOIN user_settings us ON us.user_id = l.user_id
+      WHERE l.user_id IS NOT NULL
+        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
+        AND us.platform IN ('ios', 'android')
+        AND us.device_model IS NOT NULL AND us.device_model <> ''
+      GROUP BY us.platform, us.device_model
+      ORDER BY us.platform, user_count DESC;`,
   ])
 
   const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily,
@@ -508,7 +551,7 @@ const handler: Handler = async (event, context) => {
     categoryClickUsers, entityViewUsers, exploreLimitUsers, demoStarterUsers, demoStartersDaily,
     demoCompletedWeek, demoCompletedPrior, demoSkippedWeek, demoSkippedPrior, demoSegments,
     timelineActivity, timelineCreatorUsers, timelineViewerUsers,
-    linkPrompt, linkPromptShownUsers, linkPromptLinkedUsers] = settled.map((r: any) =>
+    linkPrompt, linkPromptShownUsers, linkPromptLinkedUsers, appVersionDist, deviceStats, platformStats] = settled.map((r: any) =>
       r.status === 'fulfilled' ? r.value : []
     )
 
@@ -667,6 +710,27 @@ const handler: Handler = async (event, context) => {
           return shown > 0 ? Math.round((linked / shown) * 1000) / 10 : 0
         })(),
       },
+      appVersionDist: appVersionDist.map((v: any) => ({
+        version: v.app_version ?? 'unknown',
+        users: toNum(v.user_count),
+      })),
+      devices: (() => {
+        const byPlatform = (platform: string) => {
+          const total = platformStats.find((p: any) => p.platform === platform)
+          const models = deviceStats
+            .filter((d: any) => d.platform === platform)
+            .map((d: any) => ({ model: d.model, users: toNum(d.user_count) }))
+          return {
+            users7d: toNum(total?.users_7d),
+            users30d: toNum(total?.users_30d),
+            devices: models,
+          }
+        }
+        return {
+          ios: byPlatform('ios'),
+          android: byPlatform('android'),
+        }
+      })(),
       insights: insights.map((i: any) => ({
         insight_title: i.title,
         insight_emoji: i.emoji,

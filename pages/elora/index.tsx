@@ -7,6 +7,8 @@ import DemoFunnelCard from '@/components/Elora/Dashboard/DemoFunnelCard'
 import DualMetricCard from '@/components/Elora/Dashboard/DualMetricCard'
 import TimelineActivityCard from '@/components/Elora/Dashboard/TimelineActivityCard'
 import LinkPromptCard from '@/components/Elora/Dashboard/LinkPromptCard'
+import AppVersionCard from '@/components/Elora/Dashboard/AppVersionCard'
+import DevicePlatformCard from '@/components/Elora/Dashboard/DevicePlatformCard'
 import UserListModal from '@/components/Elora/Dashboard/UserListModal'
 import TopUsersTable from '@/components/Elora/Dashboard/TopUsersTable'
 import Spinner from '@/components/Utility/Spinner'
@@ -134,6 +136,9 @@ export default function EloraDashboard() {
               color="#a78bfa"
             />
             <LinkPromptCard data={data.linkPrompt} />
+            <AppVersionCard distribution={data.appVersionDist} />
+            <DevicePlatformCard platform="iOS" data={data.devices.ios} color="#a78bfa" icon="🍎" />
+            <DevicePlatformCard platform="Android" data={data.devices.android} color="#34d399" icon="🤖" />
           </div>
 
           <TopUsersTable users={data.topUsers} onUpdate={refresh} />
