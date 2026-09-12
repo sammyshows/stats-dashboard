@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
 import EmojiPicker from '../EmojiPicker'
+import { SsoLogos } from '../SsoLogos'
 
-interface User { user_id: string; latest_created_at: string; total_entry_count: number; emoji: string | null }
+interface User { user_id: string; latest_created_at: string; total_entry_count: number; emoji: string | null; signed_in_google?: boolean; signed_in_apple?: boolean }
 
 const shortId = (id: string) => '...' + id.slice(-12)
 
@@ -68,6 +69,7 @@ export default function TopUsersTable({ users, onUpdate }: { users: User[]; onUp
               <th className="pb-3 pr-1 font-medium">#</th>
               <th className="pb-3 pl-1 pr-3 font-medium">Emoji</th>
               <th className="pb-3 pl-4 pr-3 font-medium">User</th>
+              <th className="pb-3 pr-4 font-medium">SSO</th>
               <th className="pb-3 pr-4 font-medium">Latest</th>
               <th className="pb-3 font-medium text-right">Entries</th>
             </tr>
@@ -92,6 +94,9 @@ export default function TopUsersTable({ users, onUpdate }: { users: User[]; onUp
                   >
                     {shortId(u.user_id)}
                   </Link>
+                </td>
+                <td className="py-3 pr-4">
+                  <SsoLogos google={u.signed_in_google} apple={u.signed_in_apple} />
                 </td>
                 <td className="py-3 pr-4 text-xs text-slate-400 font-medium">{relTime(u.latest_created_at)}</td>
                 <td className="py-3 text-right">

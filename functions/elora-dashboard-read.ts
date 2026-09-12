@@ -43,11 +43,13 @@ const handler: Handler = async (event, context) => {
     client`
       SELECT je.user_id,
              us.id_emoji AS emoji,
+             us.signed_in_google,
+             us.signed_in_apple,
              MAX(je.created_at) AS latest_created_at,
              COUNT(*) AS total_entry_count
       FROM journal_entries je
       LEFT JOIN user_settings us ON us.user_id = je.user_id
-      GROUP BY je.user_id, us.id_emoji
+      GROUP BY je.user_id, us.id_emoji, us.signed_in_google, us.signed_in_apple
       ORDER BY latest_created_at DESC
       LIMIT 10;`,
 
@@ -617,6 +619,8 @@ const handler: Handler = async (event, context) => {
       topUsers: topUsers.map((u: any) => ({
         user_id: u.user_id,
         emoji: u.emoji ?? null,
+        signed_in_google: Boolean(u.signed_in_google),
+        signed_in_apple: Boolean(u.signed_in_apple),
         latest_created_at: u.latest_created_at,
         total_entry_count: toNum(u.total_entry_count),
       })),

@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
 import Link from 'next/link'
 import EmojiPicker from '../EmojiPicker'
+import { SsoLogos } from '../SsoLogos'
 
-interface User { user_id: string; latest_created_at: string; total_entry_count: number; emoji: string | null }
+interface User { user_id: string; latest_created_at: string; total_entry_count: number; emoji: string | null; signed_in_google?: boolean; signed_in_apple?: boolean }
 
 const relTime = (d: string) => {
   if (!d) return ''
@@ -40,6 +41,7 @@ export default function UsersTableHead() {
       <th className="py-4 pr-1 font-medium sticky top-0 bg-slate-900/95 backdrop-blur z-10">#</th>
       <th className="py-4 pl-1 pr-3 font-medium sticky top-0 bg-slate-900/95 backdrop-blur z-10">Emoji</th>
       <th className="py-4 pl-4 pr-4 font-medium sticky top-0 bg-slate-900/95 backdrop-blur z-10">User</th>
+      <th className="py-4 pr-4 font-medium sticky top-0 bg-slate-900/95 backdrop-blur z-10">SSO</th>
       <th className="py-4 pr-4 font-medium sticky top-0 bg-slate-900/95 backdrop-blur z-10">Latest</th>
       <th className="py-4 font-medium text-right sticky top-0 bg-slate-900/95 backdrop-blur z-10">Entries</th>
     </tr>
@@ -78,6 +80,9 @@ export function UsersTableRow({ user, index, maxEntries, onUpdate }: {
         >
           {shortId(user.user_id)}
         </Link>
+      </td>
+      <td className="py-3.5 pr-4">
+        <SsoLogos google={user.signed_in_google} apple={user.signed_in_apple} />
       </td>
       <td className="py-3.5 pr-4 text-xs text-slate-400 font-medium">{relTime(user.latest_created_at)}</td>
       <td className="py-3.5 text-right">
