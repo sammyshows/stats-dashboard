@@ -561,7 +561,7 @@ const handler: Handler = async (event, context) => {
     categoryClickUsers, entityViewUsers, exploreLimitUsers, demoStarterUsers, demoStartersDaily,
     demoCompletedWeek, demoCompletedPrior, demoSkippedWeek, demoSkippedPrior, demoSegments,
     timelineActivity, timelineCreatorUsers, timelineViewerUsers,
-    linkPrompt, linkPromptShownUsers, linkPromptLinkedUsers, appVersionDist, deviceStats, platformStats] = settled.map((r: any) =>
+    linkPrompt, linkPromptShownUsers, linkPromptLinkedUsers, appVersionDist, platformStats, deviceStats] = settled.map((r: any) =>
       r.status === 'fulfilled' ? r.value : []
     )
 
