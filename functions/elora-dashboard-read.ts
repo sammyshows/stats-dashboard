@@ -519,30 +519,38 @@ const handler: Handler = async (event, context) => {
       ORDER BY user_count DESC;`,
 
     // Platform-level active user counts (7d + 30d windows).
+    // Platform is bucketed case-insensitively (stored values vary, e.g. 'iOS'/'Android').
     client`
-      SELECT us.platform,
-             COUNT(DISTINCT l.user_id) FILTER (WHERE l.timestamp >= date_trunc('day', now()) - interval '6 days')::int AS users_7d,
-             COUNT(DISTINCT l.user_id) FILTER (WHERE l.timestamp >= date_trunc('day', now()) - interval '29 days')::int AS users_30d
+      SELECT CASE
+               WHEN LOWER(us.platform) = 'ios' THEN 'ios'
+               WHEN LOWER(us.platform) ILIKE '%android%' THEN 'android'
+               ELSE 'unknown'
+             END AS platform,
+             COUNT(DISTINCT l.user_id) FILTER (WHERE l.created_at >= date_trunc('day', now()) - interval '6 days')::int AS users_7d,
+             COUNT(DISTINCT l.user_id) FILTER (WHERE l.created_at >= date_trunc('day', now()) - interval '29 days')::int AS users_30d
       FROM logs l
-      LEFT JOIN user_settings us ON us.user_id = l.user_id
+      JOIN user_settings us ON us.user_id = l.user_id
       WHERE l.user_id IS NOT NULL
-        AND us.platform IN ('ios', 'android')
-        AND l.timestamp >= date_trunc('day', now()) - interval '29 days'
-      GROUP BY us.platform;`,
+        AND l.created_at >= date_trunc('day', now()) - interval '29 days'
+      GROUP BY 1
+      ORDER BY users_7d DESC;`,
 
     // Device platform + model among active users (7d window), per platform.
     client`
-      SELECT us.platform,
+      SELECT CASE
+               WHEN LOWER(us.platform) = 'ios' THEN 'ios'
+               WHEN LOWER(us.platform) ILIKE '%android%' THEN 'android'
+               ELSE 'unknown'
+             END AS platform,
              us.device_model AS model,
              COUNT(DISTINCT l.user_id)::int AS user_count
       FROM logs l
-      LEFT JOIN user_settings us ON us.user_id = l.user_id
+      JOIN user_settings us ON us.user_id = l.user_id
       WHERE l.user_id IS NOT NULL
-        AND l.timestamp >= date_trunc('day', now()) - interval '6 days'
-        AND us.platform IN ('ios', 'android')
+        AND l.created_at >= date_trunc('day', now()) - interval '6 days'
         AND us.device_model IS NOT NULL AND us.device_model <> ''
-      GROUP BY us.platform, us.device_model
-      ORDER BY us.platform, user_count DESC;`,
+      GROUP BY 1, us.device_model
+      ORDER BY user_count DESC;`,
   ])
 
   const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily,
