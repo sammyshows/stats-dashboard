@@ -37,8 +37,8 @@ export default function UsersTableRow(user: UsersTableRowProp) {
             <span className="absolute -top-1 ml-0.5 text-xs text-gray-400">{user.levelAttempts7Days}</span>
           </p>
           <p className="relative w-1/3">
-            {user.levelSuccesses28Days}
-            <span className="absolute -top-1 ml-0.5 text-xs text-gray-400">{user.levelAttempts28Days}</span>
+            {user.levelSuccesses30Days}
+            <span className="absolute -top-1 ml-0.5 text-xs text-gray-400">{user.levelAttempts30Days}</span>
           </p>
         </div>
         <p className="h-6 w-32 flex justify-center items-center px-2 text-sm border-r border-gray-500">{user.levelsCompleted}</p>

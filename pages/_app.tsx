@@ -43,6 +43,12 @@ export default function App({ Component, pageProps }: AppProps) {
           <Component {...pageProps} />
         </StockwiseLayout>
       );
+    } else if (router.pathname.startsWith('/letterlock-summary')) {
+      return (
+        <EloraLayout>
+          <Component {...pageProps} />
+        </EloraLayout>
+      );
     } else if (router.pathname.startsWith('/letterlock')) {
       return (
         <LetterlockLayout>

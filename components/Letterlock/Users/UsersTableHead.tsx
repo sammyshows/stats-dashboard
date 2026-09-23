@@ -31,7 +31,7 @@ export default function UsersTableHead({ sortField, sortDirection, onSort }) {
             <Image src="/icons/chevron.svg" alt="chevron" className={`absolute right-0 transition-transform duration-300 ${getChevronClass('level_attempts_7_days')}`} width={12} height={12} />
           </p>
           <p className="relative w-1/3 cursor-pointer flex items-center justify-center" onClick={() => onSort('level_attempts_28_days')}>
-            28D
+            30D
             <Image src="/icons/chevron.svg" alt="chevron" className={`absolute right-0 transition-transform duration-300 ${getChevronClass('level_attempts_28_days')}`} width={12} height={12} />
           </p>
         </div>

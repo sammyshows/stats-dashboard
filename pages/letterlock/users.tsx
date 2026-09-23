@@ -101,10 +101,10 @@ export default function Users() {
               createdAt={user.created_at}
               levelAttempts1Day={user.level_attempts_1_day}
               levelAttempts7Days={user.level_attempts_7_days}
-              levelAttempts28Days={user.level_attempts_28_days}
+              levelAttempts30Days={user.level_attempts_30_days}
               levelSuccesses1Day={user.level_successes_1_day}
               levelSuccesses7Days={user.level_successes_7_days}
-              levelSuccesses28Days={user.level_successes_28_days}
+              levelSuccesses30Days={user.level_successes_30_days}
               getUsers={getUsers}
             />
           ))

@@ -226,12 +226,6 @@ const handler: Handler = async (event, context) => {
       SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
 
     client`
-      SELECT title, emoji, ai_summary, TO_CHAR(created_at, 'DD/MM/YYYY') AS created_date
-      FROM journal_entries
-      WHERE title IS NOT NULL AND title <> '' AND emoji IS NOT NULL AND created_at >= now() - interval '7 days'
-      ORDER BY created_at DESC LIMIT 8;`,
-
-    client`
       SELECT
         (SELECT COUNT(DISTINCT user_id) FROM logs
          WHERE log_type_id = 714 AND user_id IS NOT NULL
@@ -418,21 +412,34 @@ const handler: Handler = async (event, context) => {
         AND timestamp < date_trunc('day', now()) - interval '6 days';`,
 
     client`
-      SELECT user_id, MAX(CASE WHEN notes ~ '^[0-9]+$' THEN notes::int END) AS max_step
+      -- Skippers: completeOnboarding() logs a spurious DEMO_STEP_REACHED '11',
+      -- so those users must be capped at the step they skipped from (535 notes),
+      -- and their 521 rows must exclude the fake '11' or every skipper inflates
+      -- all the bars to step 11.
+      WITH skipped AS (
+        SELECT DISTINCT user_id FROM logs
+        WHERE log_type_id = 535 AND user_id IS NOT NULL
+          AND timestamp >= date_trunc('day', now()) - interval '6 days'
+      )
+      SELECT user_id, MAX(step)::int AS max_step
       FROM (
-        -- Real progression: the furthest step reached via DEMO_STEP_REACHED (521).
-        SELECT user_id, notes FROM logs
+        -- Real progression reached via DEMO_STEP_REACHED (521).
+        -- For skippers, drop the spurious '11' that completeOnboarding writes.
+        SELECT user_id, CASE WHEN notes ~ '^[0-9]+$' THEN notes::int END AS step
+        FROM logs
         WHERE log_type_id = 521 AND user_id IS NOT NULL
           AND timestamp >= date_trunc('day', now()) - interval '6 days'
+          AND (user_id NOT IN (SELECT user_id FROM skipped)
+               OR NOT (notes ~ '^[0-9]+$' AND notes::int >= 11))
         UNION ALL
-        -- Skippers: cap their funnel contribution at the step they were on when they
-        -- tapped Skip (535 notes = current step). Exclude the spurious '11' that
-        -- completeOnboarding logs on skip.
-        SELECT user_id, COALESCE(NULLIF(REGEXP_REPLACE(notes, '[^0-9]', '', 'g'), ''), '0') AS notes
+        -- Skippers: cap their contribution at the step they were on when they
+        -- tapped Skip (535 notes = current step).
+        SELECT user_id, COALESCE(NULLIF(REGEXP_REPLACE(notes, '[^0-9]', '', 'g'), ''), '0')::int AS step
         FROM logs
         WHERE log_type_id = 535 AND user_id IS NOT NULL
           AND timestamp >= date_trunc('day', now()) - interval '6 days'
       ) t
+      WHERE step IS NOT NULL AND step BETWEEN 3 AND 11
       GROUP BY user_id;`,
 
     // Timeline created (707 = generation succeeded) and opened (709).
@@ -555,7 +562,7 @@ const handler: Handler = async (event, context) => {
 
   const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily,
     totalEntryUsers, voiceEntryUsers, voiceEntryUsersDaily, voiceEntryUserList,
-    chatUsers, chatUsersDaily, activeChatUserList, messagesDaily, insights,
+    chatUsers, chatUsersDaily, activeChatUserList, messagesDaily,
     categoryClicksUsers, categoryClicksDaily, categoryBreakdown, entityViews, entityViewsDaily,
     entityUsersDaily, exploreLimits, exploreLimitsDaily, exploreUsersDaily, demoSessions,
     categoryClickUsers, entityViewUsers, exploreLimitUsers, demoStarterUsers, demoStartersDaily,
@@ -743,12 +750,6 @@ const handler: Handler = async (event, context) => {
           android: byPlatform('android'),
         }
       })(),
-      insights: insights.map((i: any) => ({
-        insight_title: i.title,
-        insight_emoji: i.emoji,
-        insight_summary: i.ai_summary,
-        created_date: i.created_date,
-      })),
       _perf: (() => {
         const totalMs = Date.now() - handlerStart
         const sorted = [...queryTimings].sort((a, b) => b.ms - a.ms)

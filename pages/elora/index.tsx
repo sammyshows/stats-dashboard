@@ -13,24 +13,42 @@ import UserListModal from '@/components/Elora/Dashboard/UserListModal'
 import TopUsersTable from '@/components/Elora/Dashboard/TopUsersTable'
 import Spinner from '@/components/Utility/Spinner'
 
+const AI_CACHE_KEY = 'elora-ai-insights-v1'
+const AI_MAX_AGE = 24 * 60 * 60 * 1000
+
 export default function EloraDashboard() {
   const [data, setData] = useState<any>(null)
   const [aiInsights, setAiInsights] = useState<any[]>([])
-  const [entryInsights, setEntryInsights] = useState<any[]>([])
   const [userModal, setUserModal] = useState<null | 'voice' | 'activeChat' | 'activeJournal' | 'totalEntries'>(null)
 
   const refresh = () => {
     fetch('/api/elora-dashboard-read')
       .then((r) => r.json())
-      .then((d) => { setData(d); setEntryInsights(d.insights || []) })
+      .then(setData)
   }
 
   useEffect(() => { refresh() }, [])
 
+  // AI insights: cache on device, refetch at most once per 24h.
   useEffect(() => {
+    try {
+      const cached = localStorage.getItem(AI_CACHE_KEY)
+      if (cached) {
+        const { ts, insights } = JSON.parse(cached)
+        setAiInsights(insights || [])
+        if (ts && Date.now() - ts < AI_MAX_AGE) return
+      }
+    } catch {}
+
     fetch('/api/elora-ai-summary')
       .then((r) => r.json())
-      .then((d) => setAiInsights(d.insights || []))
+      .then((d) => {
+        const insights = d.insights || []
+        setAiInsights(insights)
+        try {
+          localStorage.setItem(AI_CACHE_KEY, JSON.stringify({ ts: Date.now(), insights }))
+        } catch {}
+      })
       .catch(() => {})
   }, [])
 
@@ -47,15 +65,7 @@ export default function EloraDashboard() {
             <p className="text-slate-400 text-sm mt-1">User activity and engagement across the platform</p>
           </div>
 
-          <InsightBanner
-            insights={
-              aiInsights.length ? aiInsights : entryInsights.map((e: any) => ({
-                title: e.insight_title,
-                emoji: e.insight_emoji,
-                body: e.insight_summary,
-              }))
-            }
-          />
+          <InsightBanner insights={aiInsights} />
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <ComparisonChart

@@ -79,7 +79,7 @@ export default function ComparisonChart({ title, icon, color, week, month, onOpe
           </p>
         </div>
       </div>
-      <div className="flex flex-col sm:flex-row gap-5 sm:gap-8 sm:divide-x sm:divide-slate-800">
+      <div className="flex flex-col sm:flex-row gap-5 sm:gap-8">
         <PeriodPanel label="7 Days" data={week} color={color} onOpen={onOpen} />
         <PeriodPanel label="30 Days" data={month} color={color} onOpen={onOpen} />
       </div>

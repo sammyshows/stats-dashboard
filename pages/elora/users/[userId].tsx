@@ -26,6 +26,14 @@ export default function EloraUser() {
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
+      <button
+        onClick={() => router.back()}
+        className="inline-flex items-center gap-1.5 text-[0.7rem] text-violet-400 hover:text-violet-300 font-medium transition-colors mb-5"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="m15 18-6-6 6-6" /></svg>
+        <span>Back to dashboard</span>
+      </button>
+
       {!data ? (
         <div className="h-[60vh]"><Spinner /></div>
       ) : (

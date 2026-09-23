@@ -22,29 +22,29 @@ const handler: Handler = async (event, context) => {
       COUNT(DISTINCT CASE WHEN lus.platform = 'ios' THEN user_id END) AS ios_users
     FROM
       letterlock_user_stats lus
-    WHERE lus.test_user = false;
+    WHERE lus.test_user IS NOT TRUE;
   `;
 
   // Query 2: Ads watched totals / Ad Averages
   const adsWatchedStats = async () => await client`
     SELECT
-      COUNT(CASE WHEN ad_type = 'additionalLife' THEN id END) AS ads_lives,
-      COUNT(CASE WHEN ad_type = 'additionalMoves' THEN id END) AS ads_moves,
-      ROUND(COUNT(CASE WHEN ad_type = 'additionalLife' THEN id END) / COUNT(DISTINCT law.user_id::uuid)::numeric, 2) AS ads_lives_average,
-      ROUND(COUNT(CASE WHEN ad_type = 'additionalMoves' THEN id END) / COUNT(DISTINCT law.user_id::uuid)::numeric, 2) AS ads_moves_average,
-      ROUND(SUM(CASE WHEN ad_type = 'additionalMoves' THEN law.streak ELSE 0 END) / COUNT(CASE WHEN ad_type = 'additionalMoves' THEN 1 ELSE 0 END)::numeric, 2) AS ads_streak_average,
-      COUNT(CASE WHEN created_at > (NOW() AT TIME ZONE 'Australia/Melbourne' - INTERVAL '1 DAY') THEN id END) AS ads_1_day,
-      COUNT(CASE WHEN created_at > (NOW() AT TIME ZONE 'Australia/Melbourne' - INTERVAL '7 DAY') THEN id END) AS ads_7_days,
-      COUNT(CASE WHEN created_at > (NOW() AT TIME ZONE 'Australia/Melbourne' - INTERVAL '28 DAY') THEN id END) AS ads_28_days
+      COUNT(*) FILTER (WHERE ad_type = 'additionalLife') AS ads_lives,
+      COUNT(*) FILTER (WHERE ad_type = 'additionalMoves') AS ads_moves,
+      ROUND(COUNT(*) FILTER (WHERE ad_type = 'additionalLife') / NULLIF(COUNT(DISTINCT law.user_id::uuid), 0)::numeric, 2) AS ads_lives_average,
+      ROUND(COUNT(*) FILTER (WHERE ad_type = 'additionalMoves') / NULLIF(COUNT(DISTINCT law.user_id::uuid), 0)::numeric, 2) AS ads_moves_average,
+      ROUND(SUM(CASE WHEN ad_type = 'additionalMoves' THEN law.streak ELSE 0 END) / NULLIF(COUNT(*) FILTER (WHERE ad_type = 'additionalMoves'), 0)::numeric, 2) AS ads_streak_average,
+      COUNT(*) FILTER (WHERE created_at > (NOW() AT TIME ZONE 'Australia/Melbourne' - INTERVAL '1 DAY')) AS ads_1_day,
+      COUNT(*) FILTER (WHERE created_at > (NOW() AT TIME ZONE 'Australia/Melbourne' - INTERVAL '7 DAY')) AS ads_7_days,
+      COUNT(*) FILTER (WHERE created_at > (NOW() AT TIME ZONE 'Australia/Melbourne' - INTERVAL '28 DAY')) AS ads_28_days
     FROM letterlock_ads_watched law
-    WHERE law.user_id::uuid IN (SELECT user_id FROM letterlock_user_stats WHERE test_user = false);
+    WHERE law.user_id::uuid IN (SELECT user_id FROM letterlock_user_stats WHERE test_user IS NOT TRUE);
   `;
 
   // Query 3: Levels with most Ads Watched
   const levelsMostAdsStats = async () => await client`
     SELECT current_level_id AS level, COUNT(*) AS ads_watched
     FROM letterlock_ads_watched
-    WHERE user_id::uuid IN (SELECT user_id FROM letterlock_user_stats WHERE test_user = false)
+    WHERE user_id::uuid IN (SELECT user_id FROM letterlock_user_stats WHERE test_user IS NOT TRUE)
     GROUP BY current_level_id
     ORDER BY ads_watched DESC
     LIMIT 10;
@@ -55,7 +55,7 @@ const handler: Handler = async (event, context) => {
     SELECT key AS level,
       ROUND(SUM((value->>'attemptTally')::int - (value->>'successTally')::int) / COUNT(key)::numeric, 2) AS failed_per_user
     FROM letterlock_user_stats, jsonb_each(CAST(level_history AS jsonb))
-    WHERE letterlock_user_stats.test_user = false
+    WHERE letterlock_user_stats.test_user IS NOT TRUE
     GROUP BY key
     HAVING SUM((value->>'attemptTally')::int) > 10
     ORDER BY failed_per_user DESC
@@ -67,7 +67,7 @@ const handler: Handler = async (event, context) => {
     SELECT key AS level,
       ROUND(SUM((value->>'attemptTally')::int - (value->>'successTally')::int) / COUNT(key)::numeric, 2) AS failed_per_user
     FROM letterlock_user_stats, jsonb_each(CAST(level_history AS jsonb))
-    WHERE letterlock_user_stats.test_user = false
+    WHERE letterlock_user_stats.test_user IS NOT TRUE
     GROUP BY key
     HAVING SUM((value->>'attemptTally')::int) > 10
     ORDER BY failed_per_user ASC
@@ -77,14 +77,14 @@ const handler: Handler = async (event, context) => {
   // Query 6: Level attempts and successes
   const levelProgressStats = async () => await client`
     SELECT
-      COUNT(CASE WHEN log_type = 1 AND created_at > (NOW() - INTERVAL '1 DAY') THEN log_id END) AS level_attempts_1_day,
-      COUNT(CASE WHEN log_type = 1 AND created_at > (NOW() - INTERVAL '7 DAY') THEN log_id END) AS level_attempts_7_days,
-      COUNT(CASE WHEN log_type = 1 AND created_at > (NOW() - INTERVAL '28 DAY') THEN log_id END) AS level_attempts_28_days,
-      COUNT(CASE WHEN log_type = 2 AND created_at > (NOW() - INTERVAL '1 DAY') THEN log_id END) AS level_successes_1_day,
-      COUNT(CASE WHEN log_type = 2 AND created_at > (NOW() - INTERVAL '7 DAY') THEN log_id END) AS level_successes_7_days,
-      COUNT(CASE WHEN log_type = 2 AND created_at > (NOW() - INTERVAL '28 DAY') THEN log_id END) AS level_successes_28_days
+      COUNT(*) FILTER (WHERE log_type = 1 AND created_at > (NOW() - INTERVAL '1 DAY')) AS level_attempts_1_day,
+      COUNT(*) FILTER (WHERE log_type = 1 AND created_at > (NOW() - INTERVAL '7 DAY')) AS level_attempts_7_days,
+      COUNT(*) FILTER (WHERE log_type = 1 AND created_at > (NOW() - INTERVAL '28 DAY')) AS level_attempts_28_days,
+      COUNT(*) FILTER (WHERE log_type = 2 AND created_at > (NOW() - INTERVAL '1 DAY')) AS level_successes_1_day,
+      COUNT(*) FILTER (WHERE log_type = 2 AND created_at > (NOW() - INTERVAL '7 DAY')) AS level_successes_7_days,
+      COUNT(*) FILTER (WHERE log_type = 2 AND created_at > (NOW() - INTERVAL '28 DAY')) AS level_successes_28_days
     FROM letterlock_logs
-    WHERE user_id::uuid IN (SELECT user_id FROM letterlock_user_stats WHERE test_user = false);
+    WHERE user_id::uuid IN (SELECT user_id FROM letterlock_user_stats WHERE test_user IS NOT TRUE);
   `;
 
   // Execute the queries
