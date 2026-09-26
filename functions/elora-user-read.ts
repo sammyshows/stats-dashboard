@@ -53,7 +53,7 @@ const handler: Handler = async (event, context) => {
 
   const entries = await client`
     SELECT journal_entry_id, title, emoji, ai_summary, user_summary, content, metadata,
-           created_at, entry_number,
+           created_at, entry_number, guided_entry IS NOT NULL AS is_guided,
            (CHAR_LENGTH(content) - CHAR_LENGTH(REPLACE(content, ' ', '')) + 1)::int AS word_count
     FROM journal_entries
     WHERE user_id = ${userId}
@@ -148,6 +148,7 @@ const handler: Handler = async (event, context) => {
         content: en.content,
         metadata: en.metadata,
         word_count: Number(en.word_count ?? 0),
+        is_guided: Boolean(en.is_guided),
         created_at: en.created_at,
       })),
       chats: chats.map((c: any) => ({

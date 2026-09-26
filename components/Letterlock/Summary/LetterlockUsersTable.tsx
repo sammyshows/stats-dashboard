@@ -28,24 +28,26 @@ const toProp = (u: any): UsersTableRowProp => ({
 const relTime = (d: string) => {
   if (!d) return ''
   const ms = Date.now() - new Date(d).getTime()
+  if (ms < 0) return 'just now'
   const secs = Math.floor(ms / 1000)
   if (secs < 60) return 'just now'
   const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
   const days = Math.floor(hours / 24)
   if (days === 1) return 'yesterday'
-  if (days < 7) return `${days}d ago`
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`
   const weeks = Math.floor(days / 7)
   if (weeks === 1) return '1 week ago'
-  if (weeks < 5) return `${weeks}w ago`
+  if (weeks < 5) return `${weeks} weeks ago`
   const months = Math.floor(days / 30)
   if (months === 1) return '1 month ago'
-  if (months < 12) return `${months}mo ago`
+  if (months < 12) return `${months} months ago`
   const years = Math.floor(days / 365)
   if (years === 1) return '1 year ago'
-  return '2+ years ago'
+  if (years < 2) return '1+ years ago'
+  return `${years} years ago`
 }
 
 const shortId = (id: string) => '...' + id.slice(-8)
@@ -142,7 +144,7 @@ export default function LetterlockUsersTable() {
                 <th className="py-4 pr-3 font-medium">Device Model</th>
                 <th className="py-4 pr-3 font-medium">
                   <span className="block">Levels Accomplished</span>
-                  <span className="mt-1 flex gap-7">
+                  <span className="mt-1 flex gap-[38px]">
                     <span className="">24H</span>
                     <span className="">7D</span>
                     <span className="">30D</span>
@@ -182,7 +184,7 @@ export default function LetterlockUsersTable() {
                     <span className="text-xs text-slate-400">{u.device_model || '—'}</span>
                   </td>
                   <td className="py-3 pr-3">
-                    <div className="flex gap-6 justify-start">
+                    <div className="flex gap-[34px] justify-start">
                       {[
                         { a: u.level_attempts_1_day, s: u.level_successes_1_day, label: '24H' },
                         { a: u.level_attempts_7_days, s: u.level_successes_7_days, label: '7D' },

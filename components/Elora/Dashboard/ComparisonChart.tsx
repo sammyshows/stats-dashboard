@@ -83,16 +83,6 @@ export default function ComparisonChart({ title, icon, color, week, month, onOpe
         <PeriodPanel label="7 Days" data={week} color={color} onOpen={onOpen} />
         <PeriodPanel label="30 Days" data={month} color={color} onOpen={onOpen} />
       </div>
-      {onOpen && (
-        <div className="mt-3 flex justify-end">
-          <button
-            onClick={onOpen}
-            className="text-[0.65rem] text-slate-500 hover:text-violet-300 font-medium transition-colors"
-          >
-            View users →
-          </button>
-        </div>
-      )}
     </div>
   )
 }

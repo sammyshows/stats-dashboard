@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import Head from 'next/head'
 import InsightBanner from '@/components/Elora/Dashboard/InsightBanner'
 import ComparisonChart from '@/components/Elora/Dashboard/ComparisonChart'
+import TotalEntriesCard from '@/components/Elora/Dashboard/TotalEntriesCard'
 import CategoryClicksCard from '@/components/Elora/Dashboard/CategoryClicksCard'
 import EntityAnalysesCard from '@/components/Elora/Dashboard/EntityAnalysesCard'
 import DemoFunnelCard from '@/components/Elora/Dashboard/DemoFunnelCard'
@@ -53,7 +55,9 @@ export default function EloraDashboard() {
   }, [])
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
+    <>
+      <Head><title>Elora Insights</title></Head>
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
       {!data ? (
         <div className="h-[60vh]"><Spinner /></div>
       ) : (
@@ -77,12 +81,12 @@ export default function EloraDashboard() {
               onOpen={() => setUserModal('activeJournal')}
             />
             <ComparisonChart
-              title="Total Entries"
-              icon="📄"
-              color="#f472b6"
-              week={data.totalEntries.week}
-              month={data.totalEntries.month}
-              onOpen={() => setUserModal('totalEntries')}
+              title="Active Chat Users"
+              icon="👥"
+              color="#34d399"
+              week={data.activeChatUsers.week}
+              month={data.activeChatUsers.month}
+              onOpen={() => setUserModal('activeChat')}
             />
             <ComparisonChart
               title="Voice Entry Users"
@@ -92,20 +96,18 @@ export default function EloraDashboard() {
               month={data.voiceEntryUsers.month}
               onOpen={() => setUserModal('voice')}
             />
+            <TotalEntriesCard
+              regular={data.totalEntries.regular}
+              guided={data.totalEntries.guided}
+              color="#f472b6"
+              onOpen={() => setUserModal('totalEntries')}
+            />
             <ComparisonChart
               title="Chat Messages"
               icon="💬"
               color="#22d3ee"
               week={data.chatMessages.week}
               month={data.chatMessages.month}
-            />
-            <ComparisonChart
-              title="Active Chat Users"
-              icon="👥"
-              color="#34d399"
-              week={data.activeChatUsers.week}
-              month={data.activeChatUsers.month}
-              onOpen={() => setUserModal('activeChat')}
             />
             <DualMetricCard
               title="Chat Limits Reached"
@@ -189,6 +191,7 @@ export default function EloraDashboard() {
           onClose={() => setUserModal(null)}
         />
       )}
-    </div>
+      </div>
+    </>
   )
 }

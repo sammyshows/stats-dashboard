@@ -49,29 +49,42 @@ const handler: Handler = async (event, context) => {
              COUNT(*) AS total_entry_count
       FROM journal_entries je
       LEFT JOIN user_settings us ON us.user_id = je.user_id
+      WHERE je.web_journal IS NOT TRUE
+         OR (us.app_version IS NOT NULL AND us.app_version <> '')
       GROUP BY je.user_id, us.id_emoji, us.signed_in_google, us.signed_in_apple
       ORDER BY latest_created_at DESC
       LIMIT 10;`,
 
     client`
       SELECT
-        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
-        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '13 days'
-           AND created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
-        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
-        (SELECT COUNT(DISTINCT user_id) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '59 days'
-           AND created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`,
+        (SELECT COUNT(DISTINCT je.user_id) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND je.created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
+        (SELECT COUNT(DISTINCT je.user_id) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND je.created_at >= date_trunc('day', now()) - interval '13 days'
+           AND je.created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
+        (SELECT COUNT(DISTINCT je.user_id) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND je.created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
+        (SELECT COUNT(DISTINCT je.user_id) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND je.created_at >= date_trunc('day', now()) - interval '59 days'
+           AND je.created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`,
 
     dailySeries(client`
       WITH days AS (
         SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
       ), daily AS (
-        SELECT created_at::date AS day, COUNT(DISTINCT user_id)::int AS count
-        FROM journal_entries WHERE created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY created_at::date
+        SELECT je.created_at::date AS day, COUNT(DISTINCT je.user_id)::int AS count
+        FROM journal_entries je
+        LEFT JOIN user_settings us ON us.user_id = je.user_id
+        WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+          AND je.created_at >= date_trunc('day', now()) - interval '59 days' GROUP BY je.created_at::date
       )
       SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
 
@@ -79,29 +92,82 @@ const handler: Handler = async (event, context) => {
       SELECT DISTINCT je.user_id, us.id_emoji AS emoji
       FROM journal_entries je
       LEFT JOIN user_settings us ON us.user_id = je.user_id
-      WHERE je.created_at >= date_trunc('day', now()) - interval '6 days'
+      WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+        AND je.created_at >= date_trunc('day', now()) - interval '6 days'
       ORDER BY je.user_id;`,
 
     client`
       SELECT
-        (SELECT COUNT(*) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '6 days') AS this_week,
-        (SELECT COUNT(*) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '13 days'
-           AND created_at < date_trunc('day', now()) - interval '6 days') AS prior_week,
-        (SELECT COUNT(*) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '29 days') AS this_month,
-        (SELECT COUNT(*) FROM journal_entries
-         WHERE created_at >= date_trunc('day', now()) - interval '59 days'
-           AND created_at < date_trunc('day', now()) - interval '29 days') AS prior_month;`,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '6 days') AS reg_this_week,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '13 days'
+           AND je.created_at < date_trunc('day', now()) - interval '6 days') AS reg_prior_week,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '29 days') AS reg_this_month,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '59 days'
+           AND je.created_at < date_trunc('day', now()) - interval '29 days') AS reg_prior_month,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NOT NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '6 days') AS guide_this_week,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NOT NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '13 days'
+           AND je.created_at < date_trunc('day', now()) - interval '6 days') AS guide_prior_week,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NOT NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '29 days') AS guide_this_month,
+        (SELECT COUNT(*) FROM journal_entries je
+         LEFT JOIN user_settings us ON us.user_id = je.user_id
+         WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+           AND guided_entry IS NOT NULL
+           AND je.created_at >= date_trunc('day', now()) - interval '59 days'
+           AND je.created_at < date_trunc('day', now()) - interval '29 days') AS guide_prior_month;`,
 
     dailySeries(client`
       WITH days AS (
         SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
       ), daily AS (
-        SELECT created_at::date AS day, COUNT(*)::int AS count
-        FROM journal_entries WHERE created_at >= date_trunc('day', now()) - interval '59 days'
-        GROUP BY created_at::date
+        SELECT je.created_at::date AS day, COUNT(*)::int AS count
+        FROM journal_entries je
+        LEFT JOIN user_settings us ON us.user_id = je.user_id
+        WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+          AND guided_entry IS NULL
+          AND je.created_at >= date_trunc('day', now()) - interval '59 days'
+        GROUP BY je.created_at::date
+      )
+      SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
+
+    dailySeries(client`
+      WITH days AS (
+        SELECT generate_series(date_trunc('day', now()) - interval '59 days', date_trunc('day', now()), interval '1 day')::date AS day
+      ), daily AS (
+        SELECT je.created_at::date AS day, COUNT(*)::int AS count
+        FROM journal_entries je
+        LEFT JOIN user_settings us ON us.user_id = je.user_id
+        WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+          AND guided_entry IS NOT NULL
+          AND je.created_at >= date_trunc('day', now()) - interval '59 days'
+        GROUP BY je.created_at::date
       )
       SELECT d.day, COALESCE(daily.count, 0)::int AS count FROM days d LEFT JOIN daily ON daily.day = d.day ORDER BY d.day;`),
 
@@ -109,7 +175,8 @@ const handler: Handler = async (event, context) => {
       SELECT je.user_id, us.id_emoji AS emoji, COUNT(*)::int AS entry_count
       FROM journal_entries je
       LEFT JOIN user_settings us ON us.user_id = je.user_id
-      WHERE je.created_at >= date_trunc('day', now()) - interval '6 days'
+      WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+        AND je.created_at >= date_trunc('day', now()) - interval '6 days'
       GROUP BY je.user_id, us.id_emoji
       ORDER BY entry_count DESC;`,
 
@@ -120,28 +187,36 @@ const handler: Handler = async (event, context) => {
          WHERE v.log_type_id = 1
            AND v.created_at >= date_trunc('day', now()) - interval '6 days'
            AND EXISTS (SELECT 1 FROM journal_entries je
+                       LEFT JOIN user_settings us ON us.user_id = je.user_id
                        WHERE je.user_id = v.user_id
+                         AND (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
                          AND je.created_at >= date_trunc('day', now()) - interval '6 days')) AS this_week,
         (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
          WHERE v.log_type_id = 1
            AND v.created_at >= date_trunc('day', now()) - interval '13 days'
            AND v.created_at < date_trunc('day', now()) - interval '6 days'
            AND EXISTS (SELECT 1 FROM journal_entries je
+                       LEFT JOIN user_settings us ON us.user_id = je.user_id
                        WHERE je.user_id = v.user_id
+                         AND (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
                          AND je.created_at >= date_trunc('day', now()) - interval '13 days'
                            AND je.created_at < date_trunc('day', now()) - interval '6 days')) AS prior_week,
         (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
          WHERE v.log_type_id = 1
            AND v.created_at >= date_trunc('day', now()) - interval '29 days'
            AND EXISTS (SELECT 1 FROM journal_entries je
+                       LEFT JOIN user_settings us ON us.user_id = je.user_id
                        WHERE je.user_id = v.user_id
+                         AND (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
                          AND je.created_at >= date_trunc('day', now()) - interval '29 days')) AS this_month,
         (SELECT COUNT(DISTINCT v.user_id) FROM ai_logs v
          WHERE v.log_type_id = 1
            AND v.created_at >= date_trunc('day', now()) - interval '59 days'
            AND v.created_at < date_trunc('day', now()) - interval '29 days'
            AND EXISTS (SELECT 1 FROM journal_entries je
+                       LEFT JOIN user_settings us ON us.user_id = je.user_id
                        WHERE je.user_id = v.user_id
+                         AND (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
                          AND je.created_at >= date_trunc('day', now()) - interval '59 days'
                            AND je.created_at < date_trunc('day', now()) - interval '29 days')) AS prior_month;`,
 
@@ -155,7 +230,9 @@ const handler: Handler = async (event, context) => {
           WHERE v.log_type_id = 1
             AND v.created_at >= date_trunc('day', now()) - interval '59 days'
             AND EXISTS (SELECT 1 FROM journal_entries je
+                        LEFT JOIN user_settings us ON us.user_id = je.user_id
                         WHERE je.user_id = v.user_id
+                          AND (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
                           AND date_trunc('day', je.created_at)::date = date_trunc('day', v.created_at)::date)
         ) v GROUP BY v.day
       )
@@ -168,7 +245,9 @@ const handler: Handler = async (event, context) => {
       WHERE v.log_type_id = 1
         AND v.created_at >= date_trunc('day', now()) - interval '6 days'
         AND EXISTS (SELECT 1 FROM journal_entries je
+                    LEFT JOIN user_settings us2 ON us2.user_id = je.user_id
                     WHERE je.user_id = v.user_id
+                      AND (je.web_journal IS NOT TRUE OR (us2.app_version IS NOT NULL AND us2.app_version <> ''))
                       AND je.created_at >= date_trunc('day', now()) - interval '6 days')
       ORDER BY v.user_id;`,
 
@@ -560,7 +639,7 @@ const handler: Handler = async (event, context) => {
       ORDER BY user_count DESC;`,
   ])
 
-  const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily,
+  const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily, totalEntriesGuidedDaily,
     totalEntryUsers, voiceEntryUsers, voiceEntryUsersDaily, voiceEntryUserList,
     chatUsers, chatUsersDaily, activeChatUserList, messagesDaily,
     categoryClicksUsers, categoryClicksDaily, categoryBreakdown, entityViews, entityViewsDaily,
@@ -645,8 +724,14 @@ const handler: Handler = async (event, context) => {
         users: activeJournalUserList.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
       },
       totalEntries: {
-        week: build(te?.this_week, te?.prior_week, totalEntriesDaily, 7),
-        month: build(te?.this_month, te?.prior_month, totalEntriesDaily, 30),
+        regular: {
+          week: build(te?.reg_this_week, te?.reg_prior_week, totalEntriesDaily, 7),
+          month: build(te?.reg_this_month, te?.reg_prior_month, totalEntriesDaily, 30),
+        },
+        guided: {
+          week: build(te?.guide_this_week, te?.guide_prior_week, totalEntriesGuidedDaily, 7),
+          month: build(te?.guide_this_month, te?.guide_prior_month, totalEntriesGuidedDaily, 30),
+        },
         users: totalEntryUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null, metric: toNum(u.entry_count) })),
       },
       voiceEntryUsers: {

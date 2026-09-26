@@ -9,6 +9,7 @@ interface Entry {
   insight_bio: string
   content: string
   word_count: number
+  is_guided?: boolean
   created_at: string
 }
 
@@ -36,6 +37,7 @@ export default function UserEntries({ entries }: { entries: Entry[] }) {
                 <th className="py-4 pl-5 pr-3 font-medium w-12"></th>
                 <th className="py-4 pr-3 font-medium">Title</th>
                 <th className="py-4 pr-3 font-medium">Date</th>
+                <th className="py-4 pr-3 font-medium"></th>
                 <th className="py-4 pr-5 font-medium text-right">Words</th>
               </tr>
             </thead>
@@ -51,6 +53,11 @@ export default function UserEntries({ entries }: { entries: Entry[] }) {
                     <span className="text-sm text-slate-200 line-clamp-1">{e.insight_title || 'Untitled Entry'}</span>
                   </td>
                   <td className="py-3.5 pr-3 text-xs text-slate-400 font-mono">{fmt(e.created_at)}</td>
+                  <td className="py-3.5 pr-3 text-center">
+                    {e.is_guided && (
+                      <span title="Guided entry" className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-violet-500/15 border border-violet-500/30 text-xs">🧭</span>
+                    )}
+                  </td>
                   <td className="py-3.5 pr-5 text-right text-xs text-slate-400 tabular-nums">
                     {e.word_count.toLocaleString()}
                   </td>

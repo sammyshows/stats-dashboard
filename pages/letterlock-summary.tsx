@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Head from 'next/head'
 import LetterlockMetricCard from '@/components/Letterlock/Summary/LetterlockMetricCard'
 import LetterlockUsersTable from '@/components/Letterlock/Summary/LetterlockUsersTable'
 import Spinner from '@/components/Utility/Spinner'
@@ -14,7 +15,9 @@ export default function LetterlockSummary() {
   }, [])
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
+    <>
+      <Head><title>Letterlock Insights</title></Head>
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
       {!data ? (
         <div className="h-[60vh]"><Spinner /></div>
       ) : (
@@ -62,6 +65,7 @@ export default function LetterlockSummary() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
