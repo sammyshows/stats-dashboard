@@ -26,8 +26,8 @@ function PeriodRow({ label, data, color }: { label: string; data: PeriodData; co
 }
 
 export default function TotalEntriesCard({ regular, guided, color, onOpen }: {
-  regular: PeriodData
-  guided: PeriodData
+  regular: { week: PeriodData; month: PeriodData }
+  guided: { week: PeriodData; month: PeriodData }
   color: string
   onOpen?: () => void
 }) {
@@ -50,8 +50,8 @@ export default function TotalEntriesCard({ regular, guided, color, onOpen }: {
             <span className="text-[0.6rem] text-slate-500">non-guided</span>
           </div>
           <div className="flex flex-col lg:flex-row lg:gap-6">
-            <PeriodRow label="7 Days" data={regular} color={color} />
-            <PeriodRow label="30 Days" data={regular} color={color} />
+            <PeriodRow label="7 Days" data={regular.week} color={color} />
+            <PeriodRow label="30 Days" data={regular.month} color={color} />
           </div>
         </div>
 
@@ -61,8 +61,8 @@ export default function TotalEntriesCard({ regular, guided, color, onOpen }: {
             <span className="text-[0.6rem] text-slate-500">guided journaling</span>
           </div>
           <div className="flex flex-col lg:flex-row lg:gap-6">
-            <PeriodRow label="7 Days" data={guided} color={color} />
-            <PeriodRow label="30 Days" data={guided} color={color} />
+            <PeriodRow label="7 Days" data={guided.week} color={color} />
+            <PeriodRow label="30 Days" data={guided.month} color={color} />
           </div>
         </div>
       </div>
