@@ -176,6 +176,17 @@ const handler: Handler = async (event, context) => {
       FROM journal_entries je
       LEFT JOIN user_settings us ON us.user_id = je.user_id
       WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+        AND guided_entry IS NULL
+        AND je.created_at >= date_trunc('day', now()) - interval '6 days'
+      GROUP BY je.user_id, us.id_emoji
+      ORDER BY entry_count DESC;`,
+
+    client`
+      SELECT je.user_id, us.id_emoji AS emoji, COUNT(*)::int AS entry_count
+      FROM journal_entries je
+      LEFT JOIN user_settings us ON us.user_id = je.user_id
+      WHERE (je.web_journal IS NOT TRUE OR (us.app_version IS NOT NULL AND us.app_version <> ''))
+        AND guided_entry IS NOT NULL
         AND je.created_at >= date_trunc('day', now()) - interval '6 days'
       GROUP BY je.user_id, us.id_emoji
       ORDER BY entry_count DESC;`,
@@ -640,7 +651,7 @@ const handler: Handler = async (event, context) => {
   ])
 
   const [topUsers, journalUsers, journalDaily, activeJournalUserList, totalEntries, totalEntriesDaily, totalEntriesGuidedDaily,
-    totalEntryUsers, voiceEntryUsers, voiceEntryUsersDaily, voiceEntryUserList,
+    traditionalEntryUsers, guidedEntryUsers, voiceEntryUsers, voiceEntryUsersDaily, voiceEntryUserList,
     chatUsers, chatUsersDaily, activeChatUserList, messagesDaily,
     categoryClicksUsers, categoryClicksDaily, categoryBreakdown, entityViews, entityViewsDaily,
     entityUsersDaily, exploreLimits, exploreLimitsDaily, exploreUsersDaily, demoSessions,
@@ -724,15 +735,16 @@ const handler: Handler = async (event, context) => {
         users: activeJournalUserList.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null })),
       },
       totalEntries: {
-        regular: {
+        traditional: {
           week: build(te?.reg_this_week, te?.reg_prior_week, totalEntriesDaily, 7),
           month: build(te?.reg_this_month, te?.reg_prior_month, totalEntriesDaily, 30),
+          users: traditionalEntryUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null, metric: toNum(u.entry_count) })),
         },
         guided: {
           week: build(te?.guide_this_week, te?.guide_prior_week, totalEntriesGuidedDaily, 7),
           month: build(te?.guide_this_month, te?.guide_prior_month, totalEntriesGuidedDaily, 30),
+          users: guidedEntryUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null, metric: toNum(u.entry_count) })),
         },
-        users: totalEntryUsers.map((u: any) => ({ user_id: u.user_id, emoji: u.emoji ?? null, metric: toNum(u.entry_count) })),
       },
       voiceEntryUsers: {
         week: build(vu?.this_week, vu?.prior_week, voiceEntryUsersDaily, 7),

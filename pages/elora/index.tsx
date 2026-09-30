@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import Head from 'next/head'
 import InsightBanner from '@/components/Elora/Dashboard/InsightBanner'
 import ComparisonChart from '@/components/Elora/Dashboard/ComparisonChart'
-import TotalEntriesCard from '@/components/Elora/Dashboard/TotalEntriesCard'
 import CategoryClicksCard from '@/components/Elora/Dashboard/CategoryClicksCard'
 import EntityAnalysesCard from '@/components/Elora/Dashboard/EntityAnalysesCard'
 import DemoFunnelCard from '@/components/Elora/Dashboard/DemoFunnelCard'
@@ -21,7 +20,7 @@ const AI_MAX_AGE = 24 * 60 * 60 * 1000
 export default function EloraDashboard() {
   const [data, setData] = useState<any>(null)
   const [aiInsights, setAiInsights] = useState<any[]>([])
-  const [userModal, setUserModal] = useState<null | 'voice' | 'activeChat' | 'activeJournal' | 'totalEntries'>(null)
+  const [userModal, setUserModal] = useState<null | 'voice' | 'activeChat' | 'activeJournal' | 'traditionalEntries' | 'guidedEntries'>(null)
 
   const refresh = () => {
     fetch('/api/elora-dashboard-read')
@@ -96,11 +95,21 @@ export default function EloraDashboard() {
               month={data.voiceEntryUsers.month}
               onOpen={() => setUserModal('voice')}
             />
-            <TotalEntriesCard
-              regular={data.totalEntries.regular}
-              guided={data.totalEntries.guided}
+            <ComparisonChart
+              title="Traditional Entries"
+              icon="📄"
               color="#f472b6"
-              onOpen={() => setUserModal('totalEntries')}
+              week={data.totalEntries.traditional.week}
+              month={data.totalEntries.traditional.month}
+              onOpen={() => setUserModal('traditionalEntries')}
+            />
+            <ComparisonChart
+              title="Guided Entries"
+              icon="🧭"
+              color="#a78bfa"
+              week={data.totalEntries.guided.week}
+              month={data.totalEntries.guided.month}
+              onOpen={() => setUserModal('guidedEntries')}
             />
             <ComparisonChart
               title="Chat Messages"
@@ -119,6 +128,8 @@ export default function EloraDashboard() {
               uniqueUsers={data.exploreLimits.uniqueUsers}
               users={data.exploreLimits.users}
             />
+            <DevicePlatformCard platform="iOS" data={data.devices.ios} color="#a78bfa" icon="🍎" />
+            <DevicePlatformCard platform="Android" data={data.devices.android} color="#34d399" icon="🤖" />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -149,8 +160,6 @@ export default function EloraDashboard() {
             />
             <LinkPromptCard data={data.linkPrompt} />
             <AppVersionCard distribution={data.appVersionDist} />
-            <DevicePlatformCard platform="iOS" data={data.devices.ios} color="#a78bfa" icon="🍎" />
-            <DevicePlatformCard platform="Android" data={data.devices.android} color="#34d399" icon="🤖" />
           </div>
 
           <TopUsersTable users={data.topUsers} onUpdate={refresh} />
@@ -182,12 +191,21 @@ export default function EloraDashboard() {
           onClose={() => setUserModal(null)}
         />
       )}
-      {userModal === 'totalEntries' && (
+      {userModal === 'traditionalEntries' && (
         <UserListModal
-          users={data.totalEntries.users}
-          title="Users with Entries"
+          users={data.totalEntries.traditional.users}
+          title="Traditional Entries"
           metricLabel="Entries"
-          subtitle={`${data.totalEntries.users.length.toLocaleString()} unique users · past 7 days`}
+          subtitle={`${data.totalEntries.traditional.users.length.toLocaleString()} unique users · past 7 days`}
+          onClose={() => setUserModal(null)}
+        />
+      )}
+      {userModal === 'guidedEntries' && (
+        <UserListModal
+          users={data.totalEntries.guided.users}
+          title="Guided Entries"
+          metricLabel="Entries"
+          subtitle={`${data.totalEntries.guided.users.length.toLocaleString()} unique users · past 7 days`}
           onClose={() => setUserModal(null)}
         />
       )}

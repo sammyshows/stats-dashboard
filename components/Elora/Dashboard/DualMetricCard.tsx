@@ -26,7 +26,7 @@ export default function DualMetricCard({ title, subtitle, icon, color, total, to
         </div>
       </div>
       <div className="flex flex-col gap-6">
-        <MetricPanel label={totalLabel} data={total} color={color} />
+        <MetricPanel label={totalLabel} data={total} color={color} onOpen={() => setOpenUsers(true)} />
         <MetricPanel label="Unique Users" data={uniqueUsers} color={color} showLine={false} onOpen={() => setOpenUsers(true)} />
       </div>
 
